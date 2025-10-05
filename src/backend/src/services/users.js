@@ -1,4 +1,5 @@
 import { User } from '../models/User.js';
+import { hashPassword } from '../utils/password.js';
 
 export class UsersService {
   constructor(dbPool) {
@@ -7,7 +8,13 @@ export class UsersService {
 
   async createUser(userData) {
     try {
-      const user = await this.userModel.create(userData);
+      const hashedPassword = await hashPassword(userData.password);
+      
+      const user = await this.userModel.create({
+        ...userData,
+        password_hash: hashedPassword
+      });
+      
       return user;
     } catch (error) {
       console.error('Error in createUser service:', error);
