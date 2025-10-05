@@ -1,0 +1,21 @@
+{
+  "name": "noirion-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --legacy-watch index.js",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@apollo/server": "^5.0.0",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.2.3",
+    "graphql": "^16.7.0",
+    "graphql-tag": "^2.12.6",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "vitest": "^1.0.0"
+  }
+}
