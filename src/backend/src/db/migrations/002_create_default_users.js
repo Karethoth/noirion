@@ -1,9 +1,9 @@
 const bcrypt = require('bcrypt');
+const { hashPassword } = require('../../utils/password');
 
 exports.up = async (pgClient) => {
-  // Generate password hash once and reuse it
   const password = 'password';
-  const password_hash = await bcrypt.hash(password, 10);
+  const password_hash = await hashPassword(password);
 
   try {
     const users = [
