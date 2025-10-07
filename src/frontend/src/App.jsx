@@ -1,8 +1,7 @@
-import { useState } from 'react'
 import { ApolloClient, HttpLink, InMemoryCache, gql } from '@apollo/client'
 import { ApolloProvider, useQuery } from '@apollo/client/react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import ImageMap from './components/ImageMap'
+import ImageUpload from './components/ImageUpload'
 import './App.css'
 
 const client = new ApolloClient({
@@ -29,35 +28,20 @@ function Hello() {
 }
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
     <ApolloProvider client={client}>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+      <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
+        <h1>🔍 Noirion - Image Investigation Platform</h1>
+        <p>Upload images with GPS data and visualize them on an OpenStreetMap</p>
+        
+        <Hello />
+        
+        <h2>📤 Upload Images</h2>
+        <ImageUpload />
+        
+        <h2>🗺️ Image Map</h2>
+        <ImageMap />
       </div>
-
-      <h1>Vite & React & Apollo</h1>
-
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-
-      <Hello />
-
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
     </ApolloProvider>
   )
 }

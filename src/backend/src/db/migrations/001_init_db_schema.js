@@ -183,9 +183,26 @@ exports.up = async (pgClient) => {
     CREATE INDEX idx_presences_observed_at ON presences(observed_at);
     CREATE INDEX idx_presences_geom ON presences USING GIST(geom);
   `);
+
+  // General-purpose system log table
+  await pgClient.query(`
+    CREATE TABLE system_logs (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      log_level text NOT NULL, -- e.g. 'error', 'warn', 'info', 'debug'
+      event_type text,         -- e.g. 'asset_upload', 'user_login', 'db_error', etc.
+      message text NOT NULL,
+      details jsonb DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      created_by uuid REFERENCES users(id)
+    );
+    CREATE INDEX idx_system_logs_level ON system_logs(log_level);
+    CREATE INDEX idx_system_logs_event_type ON system_logs(event_type);
+    CREATE INDEX idx_system_logs_created_at ON system_logs(created_at DESC);
+  `);
 };
 
 exports.down = async (pgClient) => {
+  await pgClient.query(`DROP TABLE IF EXISTS system_logs CASCADE;`);
   await pgClient.query(`DROP TABLE IF EXISTS presence_entities CASCADE;`);
   await pgClient.query(`DROP TABLE IF EXISTS presences CASCADE;`);
   await pgClient.query(`DROP TABLE IF EXISTS asset_ocr CASCADE;`);
