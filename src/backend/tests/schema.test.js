@@ -1,7 +1,7 @@
 import { ApolloServer } from '@apollo/server';
 import { gql } from 'graphql-tag';
 import { test, expect } from 'vitest';
-import { typeDefs as schemaTypeDefs, resolvers as schemaResolvers } from '../src/graphql/schemas/schema';
+import { typeDefs } from '../src/graphql/schemas/schema.js';
 
 test('should return hello message', () => {
   const resolvers = {
@@ -14,7 +14,7 @@ test('should return hello message', () => {
 });
 
 test('should start Apollo server correctly', async () => {
-  const typeDefs = gql`
+  const testTypeDefs = gql`
     type Query {
       hello: String
     }
@@ -27,20 +27,18 @@ test('should start Apollo server correctly', async () => {
   };
 
   const server = new ApolloServer({
-    typeDefs,
+    typeDefs: testTypeDefs,
     resolvers: testResolvers
   });
 
   expect(server).toBeDefined();
 });
 
-
 test('should have valid schema definitions', () => {
-  expect(schemaTypeDefs).toContain('type Query');
-  expect(schemaTypeDefs).toContain('hello: String');
-
-  expect(schemaResolvers).toBeDefined();
-  expect(schemaResolvers.Query).toBeDefined();
+  expect(typeDefs).toBeDefined();
+  expect(typeDefs).toContain('type Query');
+  expect(typeDefs).toContain('type Image');
+  expect(typeDefs).toContain('type Annotation');
 });
 
 
