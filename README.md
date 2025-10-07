@@ -5,4 +5,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
 [![PostGIS](https://img.shields.io/badge/PostGIS-3.3-blue.svg)](https://postgis.net/)
 
+> **🤖 AI-Assisted Development**  
+> This project uses AI assistance as a testing ground to explore development workflows.
+
 ## TODO
