@@ -2,6 +2,8 @@ import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { gql } from 'graphql-tag';
 import { pool, testConnection } from './src/db/connection.js';
+import userResolvers from './src/graphql/resolvers/user.resolver.js';
+import { typeDefs } from './src/graphql/schemas/schema.js';
 
 async function initializeDatabase() {
   const connected = await testConnection();
@@ -10,13 +12,6 @@ async function initializeDatabase() {
     process.exit(1);
   }
 }
-
-const typeDefs = gql`
-  type Query {
-    hello: String
-    health: String
-  }
-`;
 
 const resolvers = {
   Query: {
@@ -30,17 +25,29 @@ const resolvers = {
         console.error('Database health check failed:', err);
         return 'Service is running but database connection failed';
       }
-    }
+    },
+    ...userResolvers.Query
+  },
+  Mutation: {
+    ...userResolvers.Mutation
   }
 };
 
 async function startServer() {
   await initializeDatabase();
   
-  const server = new ApolloServer({ typeDefs, resolvers });
+  const server = new ApolloServer({ 
+    typeDefs: gql(typeDefs), 
+    resolvers 
+  });
   
   const { url } = await startStandaloneServer(server, { 
-    listen: { port: 4000 }
+    listen: { port: 4000 },
+    context: async () => {
+      return {
+        dbPool: pool
+      };
+    }
   });
   
   console.log(`Server ready at ${url}`);
