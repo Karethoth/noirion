@@ -36,14 +36,50 @@ export const typeDefs = `#graphql
     mimeType: String!
     width: Int
     height: Int
+    
+    # GPS and location data
     latitude: Float
     longitude: Float
-    exifData: JSON
-    captureTimestamp: String
+    altitude: Float
+    orientation: Int
+    
+    # Camera information
     cameraMake: String
     cameraModel: String
+    lens: String
+    
+    # Exposure settings
+    iso: Int
+    aperture: Float
+    shutterSpeed: Float
+    exposureProgram: Int
+    exposureBias: Float
+    meteringMode: Int
+    
+    # Lens and focus
+    focalLength: Float
+    focalLength35mm: Int
+    
+    # Flash
+    flash: Int
+    flashMode: String
+    
+    # Image properties
+    colorSpace: Int
+    whiteBalance: Int
+    
+    # Timestamps
+    captureTimestamp: String
     uploadedAt: String!
+    
+    # Metadata
+    software: String
+    copyright: String
+    artist: String
     uploadedBy: ID
+    
+    # Full EXIF and metadata
+    exifData: JSON
     metadata: JSON
   }
   

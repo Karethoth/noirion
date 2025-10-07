@@ -1,4 +1,4 @@
-exports.up = async (pgClient) => {
+export const up = async (pgClient) => {
   await pgClient.query(`
     CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -133,6 +133,22 @@ exports.up = async (pgClient) => {
       height int,
       gps geometry(Point,4326),
       altitude numeric,
+      iso integer,
+      aperture numeric(4,2),
+      shutter_speed numeric(10,6),
+      focal_length numeric(6,2),
+      focal_length_35mm integer,
+      flash integer,
+      flash_mode text,
+      exposure_program integer,
+      exposure_bias numeric(4,2),
+      metering_mode integer,
+      white_balance integer,
+      color_space integer,
+      lens text,
+      software text,
+      copyright text,
+      artist text,
       exif_raw jsonb DEFAULT '{}'
     );
   `);
@@ -180,6 +196,11 @@ exports.up = async (pgClient) => {
     CREATE INDEX idx_entity_links_to_entity ON entity_links(to_entity);
     CREATE INDEX idx_assets_uploader_id ON assets(uploader_id);
     CREATE INDEX idx_assets_filename ON assets(filename);
+    CREATE INDEX idx_asset_metadata_exif_camera_make ON asset_metadata_exif(camera_make);
+    CREATE INDEX idx_asset_metadata_exif_camera_model ON asset_metadata_exif(camera_model);
+    CREATE INDEX idx_asset_metadata_exif_capture_timestamp ON asset_metadata_exif(capture_timestamp);
+    CREATE INDEX idx_asset_metadata_exif_gps ON asset_metadata_exif USING GIST(gps);
+    CREATE INDEX idx_asset_metadata_exif_altitude ON asset_metadata_exif(altitude) WHERE altitude IS NOT NULL;
     CREATE INDEX idx_presences_observed_at ON presences(observed_at);
     CREATE INDEX idx_presences_geom ON presences USING GIST(geom);
   `);
@@ -201,7 +222,7 @@ exports.up = async (pgClient) => {
   `);
 };
 
-exports.down = async (pgClient) => {
+export const down = async (pgClient) => {
   await pgClient.query(`DROP TABLE IF EXISTS system_logs CASCADE;`);
   await pgClient.query(`DROP TABLE IF EXISTS presence_entities CASCADE;`);
   await pgClient.query(`DROP TABLE IF EXISTS presences CASCADE;`);

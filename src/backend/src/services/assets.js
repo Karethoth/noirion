@@ -24,8 +24,68 @@ export class AssetsService {
 
   async extractExifData(buffer) {
     try {
-      const exifData = await exifr.parse(buffer);
-      return exifData || {};
+      // Extract comprehensive EXIF data
+      const exifData = await exifr.parse(buffer, {
+        tiff: true,
+        exif: true,
+        gps: true,
+        ifd0: true,
+        ifd1: true,
+        iptc: true,
+        icc: true
+      });
+      
+      if (!exifData) return {};
+
+      // Normalize and extract key metadata
+      return {
+        // Camera information
+        make: exifData.Make,
+        model: exifData.Model,
+        lens: exifData.LensModel || exifData.Lens,
+        
+        // Exposure settings
+        iso: exifData.ISO || exifData.ISOSpeedRatings,
+        aperture: exifData.FNumber || exifData.ApertureValue,
+        shutterSpeed: exifData.ExposureTime || exifData.ShutterSpeedValue,
+        exposureProgram: exifData.ExposureProgram,
+        exposureBias: exifData.ExposureCompensation || exifData.ExposureBiasValue,
+        meteringMode: exifData.MeteringMode,
+        
+        // Lens and focus
+        focalLength: exifData.FocalLength,
+        focalLength35mm: exifData.FocalLengthIn35mmFormat,
+        
+        // Flash
+        flash: exifData.Flash,
+        flashMode: exifData.FlashMode,
+        
+        // Image properties
+        orientation: exifData.Orientation,
+        colorSpace: exifData.ColorSpace,
+        whiteBalance: exifData.WhiteBalance,
+        
+        // Timestamps
+        dateTimeOriginal: exifData.DateTimeOriginal,
+        dateTime: exifData.DateTime,
+        dateTimeDigitized: exifData.DateTimeDigitized,
+        
+        // GPS data
+        latitude: exifData.latitude,
+        longitude: exifData.longitude,
+        altitude: exifData.altitude || exifData.GPSAltitude,
+        gpsTimestamp: exifData.GPSDateStamp,
+        
+        // Software/processing
+        software: exifData.Software,
+        
+        // Copyright and ownership
+        copyright: exifData.Copyright,
+        artist: exifData.Artist,
+        
+        // Full raw data for reference
+        raw: exifData
+      };
     } catch (error) {
       console.warn('Failed to extract EXIF data:', error.message);
       return {};
@@ -105,39 +165,62 @@ export class AssetsService {
         const exifData = assetData.exifData;
         
         // Extract GPS coordinates
-        let latitude = null;
-        let longitude = null;
-        if (exifData.latitude && exifData.longitude) {
-          latitude = exifData.latitude;
-          longitude = exifData.longitude;
-        } else if (exifData.GPS) {
-          latitude = exifData.GPS.latitude;
-          longitude = exifData.GPS.longitude;
-        }
+        const latitude = exifData.latitude;
+        const longitude = exifData.longitude;
+        const altitude = exifData.altitude;
 
         const gpsClause = latitude && longitude 
           ? `ST_SetSRID(ST_MakePoint($8, $7), 4326)` 
           : 'NULL';
 
+        const baseParamCount = 17;
+        const gpsParamStart = baseParamCount + 1;
+        
         const exifQuery = `
           INSERT INTO asset_metadata_exif (
             asset_id, capture_timestamp, camera_make, camera_model, 
-            width, height, gps, exif_raw
-          ) VALUES ($1, $2, $3, $4, $5, $6, ${gpsClause}, $9)
+            orientation, width, height, altitude,
+            iso, aperture, shutter_speed, focal_length, focal_length_35mm,
+            flash, flash_mode, exposure_program, exposure_bias, 
+            metering_mode, white_balance, color_space,
+            lens, software, copyright, artist,
+            gps, exif_raw
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+            ${gpsClause}, $${latitude && longitude ? gpsParamStart + 2 : gpsParamStart}
+          )
         `;
 
         const exifValues = [
-          asset.id,
-          exifData.DateTimeOriginal || exifData.DateTime || null,
-          exifData.Make || null,
-          exifData.Model || null,
-          assetData.width,
-          assetData.height,
-          JSON.stringify(exifData)
+          asset.id,                                              // $1
+          exifData.dateTimeOriginal || exifData.dateTime || null, // $2
+          exifData.make || null,                                 // $3
+          exifData.model || null,                                // $4
+          exifData.orientation || null,                          // $5
+          assetData.width,                                       // $6
+          assetData.height,                                      // $7
+          altitude || null,                                      // $8
+          exifData.iso || null,                                  // $9
+          exifData.aperture || null,                             // $10
+          exifData.shutterSpeed || null,                         // $11
+          exifData.focalLength || null,                          // $12
+          exifData.focalLength35mm || null,                      // $13
+          exifData.flash || null,                                // $14
+          exifData.flashMode || null,                            // $15
+          exifData.exposureProgram || null,                      // $16
+          exifData.exposureBias || null,                         // $17
+          exifData.meteringMode || null,                         // $18
+          exifData.whiteBalance || null,                         // $19
+          exifData.colorSpace || null,                           // $20
+          exifData.lens || null,                                 // $21
+          exifData.software || null,                             // $22
+          exifData.copyright || null,                            // $23
+          exifData.artist || null,                               // $24
+          JSON.stringify(exifData)                               // Last param (varies)
         ];
 
         if (latitude && longitude) {
-          exifValues.splice(6, 0, latitude, longitude);
+          exifValues.splice(24, 0, latitude, longitude);
         }
 
         await client.query(exifQuery, exifValues);
@@ -159,7 +242,12 @@ export class AssetsService {
       const result = await client.query(`
         SELECT a.*, 
                e.capture_timestamp, e.camera_make, e.camera_model, 
-               e.width, e.height, e.exif_raw,
+               e.orientation, e.width, e.height, e.altitude,
+               e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+               e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+               e.metering_mode, e.white_balance, e.color_space,
+               e.lens, e.software, e.copyright, e.artist,
+               e.exif_raw,
                ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
@@ -177,7 +265,12 @@ export class AssetsService {
       const result = await client.query(`
         SELECT a.*, 
                e.capture_timestamp, e.camera_make, e.camera_model, 
-               e.width, e.height, e.exif_raw,
+               e.orientation, e.width, e.height, e.altitude,
+               e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+               e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+               e.metering_mode, e.white_balance, e.color_space,
+               e.lens, e.software, e.copyright, e.artist,
+               e.exif_raw,
                ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
@@ -197,7 +290,12 @@ export class AssetsService {
       const result = await client.query(`
         SELECT a.*, 
                e.capture_timestamp, e.camera_make, e.camera_model, 
-               e.width, e.height, e.exif_raw,
+               e.orientation, e.width, e.height, e.altitude,
+               e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+               e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+               e.metering_mode, e.white_balance, e.color_space,
+               e.lens, e.software, e.copyright, e.artist,
+               e.exif_raw,
                ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
@@ -216,7 +314,12 @@ export class AssetsService {
       const result = await client.query(`
         SELECT a.*, 
                e.capture_timestamp, e.camera_make, e.camera_model, 
-               e.width, e.height, e.exif_raw,
+               e.orientation, e.width, e.height, e.altitude,
+               e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+               e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+               e.metering_mode, e.white_balance, e.color_space,
+               e.lens, e.software, e.copyright, e.artist,
+               e.exif_raw,
                ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
         FROM assets a
         JOIN asset_metadata_exif e ON a.id = e.asset_id
@@ -249,12 +352,46 @@ export class AssetsService {
       height: row.height,
       latitude: row.latitude,
       longitude: row.longitude,
-      exifData: row.exif_raw,
-      captureTimestamp: row.capture_timestamp?.toISOString(),
+      altitude: row.altitude ? parseFloat(row.altitude) : null,
+      orientation: row.orientation,
+      
+      // Camera information
       cameraMake: row.camera_make,
       cameraModel: row.camera_model,
+      lens: row.lens,
+      
+      // Exposure settings
+      iso: row.iso,
+      aperture: row.aperture ? parseFloat(row.aperture) : null,
+      shutterSpeed: row.shutter_speed ? parseFloat(row.shutter_speed) : null,
+      exposureProgram: row.exposure_program,
+      exposureBias: row.exposure_bias ? parseFloat(row.exposure_bias) : null,
+      meteringMode: row.metering_mode,
+      
+      // Lens and focus
+      focalLength: row.focal_length ? parseFloat(row.focal_length) : null,
+      focalLength35mm: row.focal_length_35mm,
+      
+      // Flash
+      flash: row.flash,
+      flashMode: row.flash_mode,
+      
+      // Image properties
+      colorSpace: row.color_space,
+      whiteBalance: row.white_balance,
+      
+      // Timestamps
+      captureTimestamp: row.capture_timestamp?.toISOString(),
       uploadedAt: row.uploaded_at?.toISOString(),
       uploadedBy: row.uploader_id,
+      
+      // Metadata
+      software: row.software,
+      copyright: row.copyright,
+      artist: row.artist,
+      
+      // Full EXIF data for advanced use
+      exifData: row.exif_raw || {},
       metadata: row.metadata || {}
     };
   }

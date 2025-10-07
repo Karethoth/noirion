@@ -1,7 +1,6 @@
-const bcrypt = require('bcrypt');
-const { hashPassword } = require('../../utils/password');
+import { hashPassword } from '../../utils/password.js';
 
-exports.up = async (pgClient) => {
+export const up = async (pgClient) => {
   const password = 'password';
   const password_hash = await hashPassword(password);
 
@@ -53,7 +52,7 @@ exports.up = async (pgClient) => {
   }
 };
 
-exports.down = async (pgClient) => {
+export const down = async (pgClient) => {
   try {
     // Delete the default users we created
     await pgClient.query(`DELETE FROM users WHERE username IN ('investigator_user', 'admin_user', 'analyst_user', 'readonly_user')`);
