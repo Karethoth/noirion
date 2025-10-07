@@ -63,15 +63,33 @@ By participating in this project, you agree to:
 
 ## Development Workflow
 
+### Branch Strategy
+
+We use a **main/develop** branching model:
+
+- **`main`** - Stable, production-ready code. Tagged releases are made from this branch.
+- **`develop`** - Integration branch for ongoing development. All feature branches merge here first.
+- **`feature/*`** - New features branch from `develop`
+- **`fix/*`** - Bug fixes branch from `develop` (or from `main` for hotfixes)
+
+```
+main (stable/production)
+  ↑
+  └─ develop (integration)
+       ↑
+       ├─ feature/your-feature
+       └─ fix/your-bugfix
+```
+
 ### Working on a Feature or Bug Fix
 
-1. **Sync with upstream**
+1. **Sync with upstream develop**
    ```bash
-   git checkout main
-   git pull upstream main
+   git checkout develop
+   git pull upstream develop
    ```
 
-2. **Create a new branch**
+2. **Create a new branch from develop**
    ```bash
    git checkout -b feature/your-feature-name
    # or
@@ -101,12 +119,39 @@ By participating in this project, you agree to:
    # See commit guidelines below
    ```
 
-6. **Push to your fork**
+6. **Keep your branch up to date**
+   ```bash
+   git checkout develop
+   git pull upstream develop
+   git checkout feature/your-feature-name
+   git rebase develop
+   ```
+
+7. **Push to your fork**
    ```bash
    git push origin feature/your-feature-name
    ```
 
-7. **Open a Pull Request** on GitHub
+8. **Open a Pull Request** targeting the **`develop`** branch on GitHub
+
+### Hotfix Workflow (Critical Bugs in Production)
+
+For urgent fixes to production:
+
+1. **Branch from main**
+   ```bash
+   git checkout main
+   git pull upstream main
+   git checkout -b hotfix/critical-bug-name
+   ```
+
+2. **Make and test the fix**
+
+3. **Create PR to main** and after merge, also merge to develop:
+   ```bash
+   git checkout develop
+   git merge main
+   ```
 
 ## Coding Standards
 
@@ -254,6 +299,56 @@ docker-compose up -d
 - Aim for at least 80% code coverage
 - Focus on critical paths and edge cases
 - Test both success and error scenarios
+
+## Release Process
+
+Releases are created by merging `develop` into `main` and tagging the release.
+
+### Creating a Release (Maintainers Only)
+
+1. **Ensure develop is stable**
+   ```bash
+   # All tests pass
+   # All features are complete
+   # Documentation is updated
+   ```
+
+2. **Update version numbers** (if applicable)
+   - Update `package.json` versions
+   - Update any version references in documentation
+
+3. **Merge develop to main**
+   ```bash
+   git checkout main
+   git pull origin main
+   git merge --no-ff develop -m "Release v1.x.x"
+   ```
+
+4. **Tag the release**
+   ```bash
+   git tag -a v1.x.x -m "Release version 1.x.x - Brief description"
+   git push origin main --tags
+   ```
+
+5. **Sync develop with main**
+   ```bash
+   git checkout develop
+   git merge main
+   git push origin develop
+   ```
+
+6. **Create GitHub Release**
+   - Go to GitHub Releases
+   - Create release from tag
+   - Add changelog and release notes
+
+### Version Numbering
+
+We follow [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
+
+- **MAJOR**: Breaking changes
+- **MINOR**: New features (backwards compatible)
+- **PATCH**: Bug fixes (backwards compatible)
 
 ## Documentation
 
