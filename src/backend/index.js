@@ -3,7 +3,9 @@ import { startStandaloneServer } from '@apollo/server/standalone';
 import { gql } from 'graphql-tag';
 import { pool, testConnection } from './src/db/connection.js';
 import userResolvers from './src/graphql/resolvers/user.resolver.js';
+import imageResolvers from './src/graphql/resolvers/image.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
+import GraphQLJSON from 'graphql-type-json';
 
 async function initializeDatabase() {
   const connected = await testConnection();
@@ -14,6 +16,8 @@ async function initializeDatabase() {
 }
 
 const resolvers = {
+  JSON: GraphQLJSON,
+  Upload: imageResolvers.Upload,
   Query: {
     hello: () => 'Hello, World!',
     health: async () => {
@@ -26,10 +30,12 @@ const resolvers = {
         return 'Service is running but database connection failed';
       }
     },
-    ...userResolvers.Query
+    ...userResolvers.Query,
+    ...imageResolvers.Query
   },
   Mutation: {
-    ...userResolvers.Mutation
+    ...userResolvers.Mutation,
+    ...imageResolvers.Mutation
   }
 };
 
