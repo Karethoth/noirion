@@ -19,30 +19,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     ctx.fillRect(x, y, width, height);
   }, []);
 
-  const drawPolygon = useCallback((ctx, coords) => {
-    if (coords.points.length < 2) return;
-    
-    ctx.beginPath();
-    ctx.moveTo(coords.points[0].x, coords.points[0].y);
-    for (let i = 1; i < coords.points.length; i++) {
-      ctx.lineTo(coords.points[i].x, coords.points[i].y);
-    }
-    ctx.closePath();
-    ctx.stroke();
-    ctx.fill();
-  }, []);
-
-  const drawFreehand = useCallback((ctx, coords) => {
-    if (coords.points.length < 2) return;
-    
-    ctx.beginPath();
-    ctx.moveTo(coords.points[0].x, coords.points[0].y);
-    for (let i = 1; i < coords.points.length; i++) {
-      ctx.lineTo(coords.points[i].x, coords.points[i].y);
-    }
-    ctx.stroke();
-  }, []);
-
   const drawPoint = useCallback((ctx, coords) => {
     ctx.beginPath();
     ctx.arc(coords.x, coords.y, 5, 0, 2 * Math.PI);
@@ -61,19 +37,13 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       case 'BOX':
         drawBox(ctx, region.coordinates);
         break;
-      case 'POLYGON':
-        drawPolygon(ctx, region.coordinates);
-        break;
-      case 'FREEHAND':
-        drawFreehand(ctx, region.coordinates);
-        break;
       case 'POINT':
         drawPoint(ctx, region.coordinates);
         break;
       default:
         break;
     }
-  }, [drawBox, drawPolygon, drawFreehand, drawPoint]);
+  }, [drawBox, drawPoint]);
 
   const redrawAnnotations = useCallback(() => {
     const canvas = canvasRef.current;
@@ -130,14 +100,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           style: { color: '#ff0000', strokeWidth: 2 }
         });
         break;
-      case 'polygon':
-      case 'freehand':
-        setDrawingRegion({
-          shapeType: currentTool.toUpperCase(),
-          coordinates: { points: [coords] },
-          style: { color: '#ff0000', strokeWidth: 2 }
-        });
-        break;
       case 'point': {
         const pointRegion = {
           shapeType: 'POINT',
@@ -155,71 +117,29 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   };
 
   const handleMouseMove = (event) => {
-    if (!drawingRegion) return;
+    if (!drawingRegion || drawingRegion.shapeType !== 'BOX') return;
     
     const coords = getCanvasCoordinates(event);
     
-    switch (drawingRegion.shapeType) {
-      case 'BOX':
-        setDrawingRegion(prev => ({
-          ...prev,
-          coordinates: {
-            ...prev.coordinates,
-            width: coords.x - prev.coordinates.x,
-            height: coords.y - prev.coordinates.y
-          }
-        }));
-        break;
-      case 'FREEHAND':
-        setDrawingRegion(prev => ({
-          ...prev,
-          coordinates: {
-            points: [...prev.coordinates.points, coords]
-          }
-        }));
-        break;
-      default:
-        break;
-    }
+    setDrawingRegion(prev => ({
+      ...prev,
+      coordinates: {
+        ...prev.coordinates,
+        width: coords.x - prev.coordinates.x,
+        height: coords.y - prev.coordinates.y
+      }
+    }));
     
     redrawAnnotations();
   };
 
   const handleMouseUp = () => {
-    if (!drawingRegion) return;
+    if (!drawingRegion || drawingRegion.shapeType !== 'BOX') return;
     
-    if (drawingRegion.shapeType === 'BOX') {
-      if (onAnnotationCreate) {
-        onAnnotationCreate(drawingRegion);
-      }
-      setDrawingRegion(null);
-    } else if (drawingRegion.shapeType === 'FREEHAND') {
-      if (onAnnotationCreate) {
-        onAnnotationCreate(drawingRegion);
-      }
-      setDrawingRegion(null);
+    if (onAnnotationCreate) {
+      onAnnotationCreate(drawingRegion);
     }
-  };
-
-  const handleCanvasClick = (event) => {
-    if (currentTool === 'polygon' && drawingRegion) {
-      const coords = getCanvasCoordinates(event);
-      setDrawingRegion(prev => ({
-        ...prev,
-        coordinates: {
-          points: [...prev.coordinates.points, coords]
-        }
-      }));
-    }
-  };
-
-  const handleCanvasDoubleClick = () => {
-    if (currentTool === 'polygon' && drawingRegion) {
-      if (onAnnotationCreate) {
-        onAnnotationCreate(drawingRegion);
-      }
-      setDrawingRegion(null);
-    }
+    setDrawingRegion(null);
   };
 
   useEffect(() => {
@@ -249,21 +169,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           onClick={() => setCurrentTool('box')}
           disabled={readOnly}
         >
-          Box
-        </button>
-        <button 
-          className={currentTool === 'polygon' ? 'active' : ''}
-          onClick={() => setCurrentTool('polygon')}
-          disabled={readOnly}
-        >
-          Polygon
-        </button>
-        <button 
-          className={currentTool === 'freehand' ? 'active' : ''}
-          onClick={() => setCurrentTool('freehand')}
-          disabled={readOnly}
-        >
-          Freehand
+          Rectangle
         </button>
         <button 
           className={currentTool === 'point' ? 'active' : ''}
@@ -272,9 +178,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
         >
           Point
         </button>
-        {drawingRegion && currentTool === 'polygon' && (
-          <span className="tool-hint">Double-click to complete polygon</span>
-        )}
         {drawingRegion && (
           <button onClick={() => { setDrawingRegion(null); redrawAnnotations(); }}>
             Cancel (ESC)
@@ -296,8 +199,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onClick={handleCanvasClick}
-          onDoubleClick={handleCanvasDoubleClick}
           style={{
             position: 'absolute',
             top: 0,
