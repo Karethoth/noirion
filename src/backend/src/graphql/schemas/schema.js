@@ -9,6 +9,8 @@ export const typeDefs = `#graphql
     images: [Image!]!
     image(id: ID!): Image
     imagesInArea(bounds: BoundsInput!): [Image!]!
+    annotations(assetId: ID!): [Annotation!]!
+    annotation(id: ID!): Annotation
   }
   
   type Mutation {
@@ -17,6 +19,14 @@ export const typeDefs = `#graphql
     deleteUser(id: Int!): Boolean
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
+    
+    # Annotation mutations
+    createAnnotation(input: CreateAnnotationInput!): Annotation!
+    updateAnnotation(id: ID!, input: UpdateAnnotationInput!): Annotation!
+    deleteAnnotation(id: ID!): Boolean!
+    addAnnotationRegion(annotationId: ID!, input: AddRegionInput!): AnnotationRegion!
+    updateAnnotationRegion(id: ID!, input: UpdateRegionInput!): AnnotationRegion!
+    deleteAnnotationRegion(id: ID!): Boolean!
   }
   
   type User {
@@ -91,6 +101,73 @@ export const typeDefs = `#graphql
   input CoordinateInput {
     lat: Float!
     lng: Float!
+  }
+  
+  enum AnnotationShapeType {
+    BOX
+    POLYGON
+    FREEHAND
+    POINT
+  }
+  
+  type Annotation {
+    id: ID!
+    assetId: ID!
+    asset: Image
+    createdBy: ID
+    title: String
+    description: String
+    regions: [AnnotationRegion!]!
+    tags: [String!]
+    entityLinks: [AnnotationEntityLink!]
+    createdAt: String!
+    updatedAt: String!
+    metadata: JSON
+  }
+  
+  type AnnotationRegion {
+    id: ID!
+    annotationId: ID!
+    shapeType: AnnotationShapeType!
+    coordinates: JSON!
+    style: JSON
+    createdAt: String!
+  }
+  
+  type AnnotationEntityLink {
+    id: ID!
+    annotationId: ID!
+    entityId: ID!
+    relationType: String
+    confidence: Float
+    notes: String
+    createdAt: String!
+  }
+  
+  input CreateAnnotationInput {
+    assetId: ID!
+    title: String
+    description: String
+    tags: [String!]
+    metadata: JSON
+  }
+  
+  input UpdateAnnotationInput {
+    title: String
+    description: String
+    tags: [String!]
+    metadata: JSON
+  }
+  
+  input AddRegionInput {
+    shapeType: AnnotationShapeType!
+    coordinates: JSON!
+    style: JSON
+  }
+  
+  input UpdateRegionInput {
+    coordinates: JSON
+    style: JSON
   }
   
   scalar JSON

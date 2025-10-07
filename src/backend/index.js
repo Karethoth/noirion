@@ -4,6 +4,7 @@ import { gql } from 'graphql-tag';
 import { pool, testConnection } from './src/db/connection.js';
 import userResolvers from './src/graphql/resolvers/user.resolver.js';
 import imageResolvers from './src/graphql/resolvers/image.resolver.js';
+import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 
@@ -31,12 +32,15 @@ const resolvers = {
       }
     },
     ...userResolvers.Query,
-    ...imageResolvers.Query
+    ...imageResolvers.Query,
+    ...annotationResolvers.Query
   },
   Mutation: {
     ...userResolvers.Mutation,
-    ...imageResolvers.Mutation
-  }
+    ...imageResolvers.Mutation,
+    ...annotationResolvers.Mutation
+  },
+  Annotation: annotationResolvers.Annotation
 };
 
 async function startServer() {

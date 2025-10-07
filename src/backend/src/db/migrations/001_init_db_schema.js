@@ -165,6 +165,66 @@ export const up = async (pgClient) => {
   `);
 
   await pgClient.query(`
+    CREATE TYPE annotation_shape_type AS ENUM ('box', 'polygon', 'freehand', 'point');
+  `);
+
+  await pgClient.query(`
+    CREATE TABLE annotations (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      asset_id uuid NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+      created_by uuid REFERENCES users(id),
+      title text,
+      description text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      metadata jsonb DEFAULT '{}'
+    );
+  `);
+
+  await pgClient.query(`
+    CREATE TABLE annotation_regions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      annotation_id uuid NOT NULL REFERENCES annotations(id) ON DELETE CASCADE,
+      shape_type annotation_shape_type NOT NULL,
+      coordinates jsonb NOT NULL,
+      style jsonb DEFAULT '{"color": "#ff0000", "strokeWidth": 2}',
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pgClient.query(`
+    CREATE TABLE annotation_tags (
+      annotation_id uuid REFERENCES annotations(id) ON DELETE CASCADE,
+      tag_id uuid REFERENCES tags(id) ON DELETE CASCADE,
+      PRIMARY KEY(annotation_id, tag_id)
+    );
+  `);
+
+  await pgClient.query(`
+    CREATE TABLE annotation_entity_links (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      annotation_id uuid NOT NULL REFERENCES annotations(id) ON DELETE CASCADE,
+      entity_id uuid NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+      relation_type text,
+      confidence numeric(5,4) DEFAULT 1.0,
+      notes text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pgClient.query(`
+    CREATE TABLE annotation_history (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      annotation_id uuid NOT NULL REFERENCES annotations(id) ON DELETE CASCADE,
+      changed_by uuid REFERENCES users(id),
+      change_type text NOT NULL,
+      previous_value jsonb,
+      new_value jsonb,
+      changed_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
+  await pgClient.query(`
     CREATE TABLE presences (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       observed_at timestamptz NOT NULL,
@@ -201,6 +261,11 @@ export const up = async (pgClient) => {
     CREATE INDEX idx_asset_metadata_exif_capture_timestamp ON asset_metadata_exif(capture_timestamp);
     CREATE INDEX idx_asset_metadata_exif_gps ON asset_metadata_exif USING GIST(gps);
     CREATE INDEX idx_asset_metadata_exif_altitude ON asset_metadata_exif(altitude) WHERE altitude IS NOT NULL;
+    CREATE INDEX idx_annotations_asset_id ON annotations(asset_id);
+    CREATE INDEX idx_annotations_created_by ON annotations(created_by);
+    CREATE INDEX idx_annotation_regions_annotation_id ON annotation_regions(annotation_id);
+    CREATE INDEX idx_annotation_regions_shape_type ON annotation_regions(shape_type);
+    CREATE INDEX idx_annotation_history_annotation_id ON annotation_history(annotation_id);
     CREATE INDEX idx_presences_observed_at ON presences(observed_at);
     CREATE INDEX idx_presences_geom ON presences USING GIST(geom);
   `);
