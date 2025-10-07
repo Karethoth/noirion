@@ -1,0 +1,40 @@
+name: Schema Check
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/backend/src/graphql/**'
+
+jobs:
+  check-schema:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: src/backend/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./src/backend
+      run: npm ci
+    
+    - name: Generate current schema
+      working-directory: ./src/backend
+      run: npm run schema:generate
+    
+    - name: Check for schema changes
+      working-directory: ./src/backend
+      run: |
+        if ! git diff --quiet schema/schema.graphql; then
+          echo "⚠️ Schema has changed!"
+          git diff schema/schema.graphql
+          exit 1
+        fi

@@ -165,7 +165,7 @@ export const up = async (pgClient) => {
   `);
 
   await pgClient.query(`
-    CREATE TYPE annotation_shape_type AS ENUM ('box', 'polygon', 'freehand', 'point');
+    CREATE TYPE annotation_shape_type AS ENUM ('box', 'point');
   `);
 
   await pgClient.query(`

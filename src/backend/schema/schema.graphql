@@ -1,4 +1,4 @@
-export const typeDefs = `#graphql
+#graphql
   scalar Upload
   
   type Query {
@@ -169,4 +169,3 @@ export const typeDefs = `#graphql
   }
   
   scalar JSON
-`;

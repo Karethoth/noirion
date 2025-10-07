@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon --legacy-watch index.js",
-    "test": "vitest"
+    "test": "vitest",
+    "schema:generate": "node scripts/generate-schema.js",
+    "schema:check": "graphql-inspector diff schema.graphql 'src/graphql/schemas/schema.js' --require esm"
   },
   "dependencies": {
     "@apollo/server": "^5.0.0",
@@ -22,6 +24,8 @@
     "sharp": "^0.34.4"
   },
   "devDependencies": {
+    "@graphql-inspector/cli": "^5.0.8",
+    "@graphql-tools/schema": "^10.0.25",
     "nodemon": "^3.0.1",
     "vitest": "^1.0.0"
   }
