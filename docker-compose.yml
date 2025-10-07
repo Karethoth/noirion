@@ -4,11 +4,11 @@ services:
   db:
     image: postgis/postgis:15-3.4
     environment:
-      POSTGRES_USER: noirion
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: noirion
+      POSTGRES_USER: ${POSTGRES_USER:-noirion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-noirion}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
 
@@ -16,9 +16,10 @@ services:
     build: ./src/backend
     container_name: noirion_backend
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:4000"
     environment:
-      DATABASE_URL: postgres://noirion:secret@db:5432/noirion
+      DATABASE_URL: ${DATABASE_URL:-postgres://noirion:secret@db:5432/noirion}
+      NODE_ENV: ${NODE_ENV:-development}
     depends_on:
       - db
     volumes:
