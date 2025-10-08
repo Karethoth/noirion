@@ -5,6 +5,7 @@ import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import ImageModal from './ImageModal';
 import 'leaflet/dist/leaflet.css';
+import './ImageMap.css';
 import L from 'leaflet';
 
 // Fix for default markers in react-leaflet
@@ -52,11 +53,50 @@ function FitBounds({ images, hasInitialized }) {
   return null;
 }
 
+// Component to apply map style class to container
+function MapStyleController({ style }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+
+    // Remove all style classes
+    container.classList.remove('map-style-day', 'map-style-night', 'map-style-satellite');
+
+    // Add the current style class
+    if (style !== 'day') { // 'day' is the default, no need for extra class
+      container.classList.add(`map-style-${style}`);
+    }
+  }, [style, map]);
+
+  return null;
+}
+
+// Map style configurations
+const MAP_STYLES = {
+  day: {
+    name: 'Day',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  },
+  night: {
+    name: 'Night',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  },
+  satellite: {
+    name: 'Satellite',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri'
+  }
+};
+
 const ImageMap = ({ userRole }) => {
   const { loading, error, data } = useQuery(GET_IMAGES);
   const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [mapStyle, setMapStyle] = useState('day');
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
 
@@ -118,9 +158,23 @@ const ImageMap = ({ userRole }) => {
   );
 
   const imagesWithLocation = data?.images?.filter(img => img.latitude && img.longitude) || [];
+  const currentStyle = MAP_STYLES[mapStyle];
 
   return (
-    <div style={{ height: '100%', width: '100%' }}>
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+      {/* Map Style Toggle */}
+      <div className="map-style-toggle">
+        {Object.entries(MAP_STYLES).map(([key, style]) => (
+          <button
+            key={key}
+            onClick={() => setMapStyle(key)}
+            className={`map-style-button ${mapStyle === key ? 'active' : ''}`}
+          >
+            {style.name}
+          </button>
+        ))}
+      </div>
+
       <MapContainer
         key="main-map"
         center={[60.1699, 24.9384]}
@@ -129,9 +183,11 @@ const ImageMap = ({ userRole }) => {
         ref={mapRef}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={mapStyle}
+          attribution={currentStyle.attribution}
+          url={currentStyle.url}
         />
+        <MapStyleController style={mapStyle} />
         <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
 
         {imagesWithLocation.map((image) => (
@@ -139,65 +195,115 @@ const ImageMap = ({ userRole }) => {
             key={image.id}
             position={[image.latitude, image.longitude]}
           >
-            <Popup>
-              <div style={{ minWidth: '200px' }}>
-                <img
-                  src={`${import.meta.env.VITE_API_URL}${image.filePath}`}
-                  alt={image.filename}
-                  style={{ width: '100%', maxWidth: '200px', height: 'auto', cursor: 'pointer' }}
-                  onClick={() => {
-                    setSelectedImage(image);
-                    setIsModalOpen(true);
-                  }}
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                    e.target.nextSibling.style.display = 'block';
-                  }}
-                />
-                <div style={{ display: 'none', padding: '10px', textAlign: 'center', background: '#f0f0f0' }}>
-                  Image not available
+            <Popup maxWidth={280} minWidth={260}>
+              <div style={{ padding: '4px' }}>
+                {/* Image Preview */}
+                <div style={{
+                  position: 'relative',
+                  width: '100%',
+                  height: '180px',
+                  overflow: 'hidden',
+                  borderRadius: '6px',
+                  marginBottom: '12px',
+                  backgroundColor: '#f5f5f5',
+                  cursor: 'pointer'
+                }}
+                onClick={() => {
+                  setSelectedImage(image);
+                  setIsModalOpen(true);
+                }}>
+                  <img
+                    src={`${import.meta.env.VITE_API_URL}${image.filePath}`}
+                    alt={image.filename}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      transition: 'transform 0.2s'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.parentElement.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #999;">Image not available</div>';
+                    }}
+                    onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+                  />
                 </div>
-                <div style={{ marginTop: '10px' }}>
+
+                {/* Metadata */}
+                <div style={{ marginBottom: '10px' }}>
                   {image.captureTimestamp && (
-                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '4px' }}>
-                      📅 {new Date(image.captureTimestamp).toLocaleString()}
+                    <div style={{
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      marginBottom: '6px',
+                      color: '#333'
+                    }}>
+                      {new Date(image.captureTimestamp).toLocaleString()}
                     </div>
                   )}
-                  <div style={{ fontSize: '11px', color: '#999', marginBottom: '8px', fontFamily: 'monospace' }}>
-                    📍 {formatMGRS(image.longitude, image.latitude)}
+                  <div style={{
+                    fontSize: '11px',
+                    color: '#666',
+                    fontFamily: 'monospace',
+                    backgroundColor: '#f8f8f8',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    marginBottom: '8px'
+                  }}>
+                    {formatMGRS(image.longitude, image.latitude)}
                   </div>
+                  {image.cameraMake && image.cameraModel && (
+                    <div style={{
+                      fontSize: '11px',
+                      color: '#888',
+                      marginBottom: '4px'
+                    }}>
+                      {image.cameraMake} {image.cameraModel}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', gap: '6px' }}>
                   <button
                     onClick={() => {
                       setSelectedImage(image);
                       setIsModalOpen(true);
                     }}
                     style={{
-                      marginTop: '5px',
-                      padding: '5px 10px',
-                      backgroundColor: '#007bff',
+                      flex: 1,
+                      padding: '8px 12px',
+                      backgroundColor: '#1a1a2e',
                       color: 'white',
                       border: 'none',
-                      borderRadius: '3px',
+                      borderRadius: '5px',
                       cursor: 'pointer',
-                      fontSize: '12px'
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      transition: 'background-color 0.2s'
                     }}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = '#2a2a4e'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = '#1a1a2e'}
                   >
-                    View Full Size
+                    View Details
                   </button>
                   {canWrite && (
                     <button
                       onClick={() => handleDeleteImage(image.id)}
                       style={{
-                        marginTop: '5px',
-                        marginLeft: '5px',
-                        padding: '5px 10px',
+                        padding: '8px 12px',
                         backgroundColor: '#dc3545',
                         color: 'white',
                         border: 'none',
-                        borderRadius: '3px',
+                        borderRadius: '5px',
                         cursor: 'pointer',
-                        fontSize: '12px'
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'background-color 0.2s'
                       }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#c82333'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = '#dc3545'}
                     >
                       Delete
                     </button>
@@ -209,10 +315,11 @@ const ImageMap = ({ userRole }) => {
         ))}
       </MapContainer>
 
-      <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-        Showing {imagesWithLocation.length} image(s) with location data
+      {/* Map Info Overlay */}
+      <div className="map-info-overlay">
+        <strong>{imagesWithLocation.length}</strong> image{imagesWithLocation.length !== 1 ? 's' : ''} with location data
         {data?.images?.length > imagesWithLocation.length && (
-          <> ({data.images.length - imagesWithLocation.length} without location)</>
+          <> · <span style={{ color: '#888' }}>{data.images.length - imagesWithLocation.length} without location</span></>
         )}
       </div>
 

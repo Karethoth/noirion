@@ -1,0 +1,94 @@
+/* Map container background colors for different styles */
+.leaflet-container {
+  background: #f0f0f0; /* Default light gray for day mode */
+}
+
+.leaflet-container.map-style-night {
+  background: #1a1a1a; /* Dark background for night mode */
+}
+
+.leaflet-container.map-style-satellite {
+  background: #2a2a2a; /* Darker gray for satellite mode */
+}
+
+/* Custom styling for Leaflet popups */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.leaflet-popup-tip {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Map controls styling */
+.map-style-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  background: rgba(248, 249, 250, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  display: flex;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(4px);
+}
+
+.map-style-button {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: #6c757d;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.map-style-button:last-child {
+  border-right: none;
+}
+
+.map-style-button:hover {
+  background: rgba(108, 117, 125, 0.1);
+  color: #495057;
+}
+
+.map-style-button.active {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.map-style-button.active:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%);
+}
+
+/* Map info overlay */
+.map-info-overlay {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 16px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  color: #333;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.map-info-overlay strong {
+  color: #1a1a2e;
+  font-weight: 600;
+}

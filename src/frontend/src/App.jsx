@@ -21,10 +21,6 @@ function MainApp({ user, onLogout }) {
     <div className="main-app">
       {/* Top Navigation Bar */}
       <nav className="top-nav">
-        <div className="nav-brand">
-          <span className="nav-logo">🔍</span>
-          <span className="nav-title">Noirion</span>
-        </div>
         <div className="nav-actions">
           {canWrite && <ImageUpload />}
           {!canWrite && (
@@ -32,6 +28,8 @@ function MainApp({ user, onLogout }) {
               Read-Only
             </div>
           )}
+        </div>
+        <div className="nav-user-section">
           <div className="user-info">
             <span className="user-name">{user.full_name || user.username}</span>
             <span className="user-role">{user.role}</span>
