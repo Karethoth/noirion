@@ -11,8 +11,12 @@ const userResolvers = {
       return [];
     }
   },
-  
+
   Mutation: {
+    login: async (parent, args, context) => {
+      const usersService = new UsersService(context.dbPool);
+      return await usersService.login(args.username, args.password);
+    },
     createUser: async (parent, args, context) => {
       const usersService = new UsersService(context.dbPool);
       const userData = {

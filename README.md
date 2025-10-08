@@ -7,5 +7,3 @@
 
 > **🤖 AI-Assisted Development**  
 > This project uses AI assistance as a testing ground to explore development workflows.
-
-## TODO

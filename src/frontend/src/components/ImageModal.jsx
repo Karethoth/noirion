@@ -1,10 +1,11 @@
 import React from 'react';
+import { formatMGRS } from '../utils/coordinates';
 
 const ImageModal = ({ image, isOpen, onClose }) => {
   if (!isOpen || !image) return null;
 
   return (
-    <div 
+    <div
       style={{
         position: 'fixed',
         top: 0,
@@ -20,7 +21,7 @@ const ImageModal = ({ image, isOpen, onClose }) => {
       }}
       onClick={onClose}
     >
-      <div 
+      <div
         style={{
           position: 'relative',
           maxWidth: '90%',
@@ -70,7 +71,7 @@ const ImageModal = ({ image, isOpen, onClose }) => {
         {/* Image metadata */}
         <div style={{ padding: '15px', fontSize: '14px', color: '#333' }}>
           <h3 style={{ margin: '0 0 10px 0' }}>{image.filename}</h3>
-          
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               {image.captureTimestamp && (
@@ -81,13 +82,12 @@ const ImageModal = ({ image, isOpen, onClose }) => {
                 <div><strong>Camera:</strong> {image.cameraMake} {image.cameraModel}</div>
               )}
             </div>
-            
+
             <div>
               {image.latitude && image.longitude && (
-                <>
-                  <div><strong>Latitude:</strong> {image.latitude.toFixed(6)}</div>
-                  <div><strong>Longitude:</strong> {image.longitude.toFixed(6)}</div>
-                </>
+                <div style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                  <strong>MGRS:</strong> {formatMGRS(image.longitude, image.latitude)}
+                </div>
               )}
               <div><strong>File Size:</strong> {image.fileSize ? (image.fileSize / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown'}</div>
             </div>

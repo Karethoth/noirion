@@ -1,6 +1,6 @@
 export const typeDefs = `#graphql
   scalar Upload
-  
+
   type Query {
     hello: String
     health: String
@@ -12,14 +12,15 @@ export const typeDefs = `#graphql
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
   }
-  
+
   type Mutation {
+    login(username: String!, password: String!): User
     createUser(username: String!, email: String!, password: String!): User
     updateUser(id: Int!, username: String, email: String): User
     deleteUser(id: Int!): Boolean
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
-    
+
     # Annotation mutations
     createAnnotation(input: CreateAnnotationInput!): Annotation!
     updateAnnotation(id: ID!, input: UpdateAnnotationInput!): Annotation!
@@ -28,14 +29,18 @@ export const typeDefs = `#graphql
     updateAnnotationRegion(id: ID!, input: UpdateRegionInput!): AnnotationRegion!
     deleteAnnotationRegion(id: ID!): Boolean!
   }
-  
+
   type User {
-    id: Int
-    username: String
-    email: String
+    id: ID!
+    username: String!
+    email: String!
+    full_name: String
+    role: String!
+    active: Boolean!
     created_at: String
+    updated_at: String
   }
-  
+
   type Image {
     id: ID!
     filename: String!
@@ -46,18 +51,18 @@ export const typeDefs = `#graphql
     mimeType: String!
     width: Int
     height: Int
-    
+
     # GPS and location data
     latitude: Float
     longitude: Float
     altitude: Float
     orientation: Int
-    
+
     # Camera information
     cameraMake: String
     cameraModel: String
     lens: String
-    
+
     # Exposure settings
     iso: Int
     aperture: Float
@@ -65,49 +70,49 @@ export const typeDefs = `#graphql
     exposureProgram: Int
     exposureBias: Float
     meteringMode: Int
-    
+
     # Lens and focus
     focalLength: Float
     focalLength35mm: Int
-    
+
     # Flash
     flash: Int
     flashMode: String
-    
+
     # Image properties
     colorSpace: Int
     whiteBalance: Int
-    
+
     # Timestamps
     captureTimestamp: String
     uploadedAt: String!
-    
+
     # Metadata
     software: String
     copyright: String
     artist: String
     uploadedBy: ID
-    
+
     # Full EXIF and metadata
     exifData: JSON
     metadata: JSON
   }
-  
+
   input BoundsInput {
     northEast: CoordinateInput!
     southWest: CoordinateInput!
   }
-  
+
   input CoordinateInput {
     lat: Float!
     lng: Float!
   }
-  
+
   enum AnnotationShapeType {
     BOX
     POINT
   }
-  
+
   type Annotation {
     id: ID!
     assetId: ID!
@@ -122,7 +127,7 @@ export const typeDefs = `#graphql
     updatedAt: String!
     metadata: JSON
   }
-  
+
   type AnnotationRegion {
     id: ID!
     annotationId: ID!
@@ -131,7 +136,7 @@ export const typeDefs = `#graphql
     style: JSON
     createdAt: String!
   }
-  
+
   type AnnotationEntityLink {
     id: ID!
     annotationId: ID!
@@ -141,7 +146,7 @@ export const typeDefs = `#graphql
     notes: String
     createdAt: String!
   }
-  
+
   input CreateAnnotationInput {
     assetId: ID!
     title: String
@@ -149,24 +154,24 @@ export const typeDefs = `#graphql
     tags: [String!]
     metadata: JSON
   }
-  
+
   input UpdateAnnotationInput {
     title: String
     description: String
     tags: [String!]
     metadata: JSON
   }
-  
+
   input AddRegionInput {
     shapeType: AnnotationShapeType!
     coordinates: JSON!
     style: JSON
   }
-  
+
   input UpdateRegionInput {
     coordinates: JSON
     style: JSON
   }
-  
+
   scalar JSON
 `;

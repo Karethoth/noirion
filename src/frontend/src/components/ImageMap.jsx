@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { useQuery, gql } from '@apollo/client';
+import { gql } from '@apollo/client';
+import { useQuery } from '@apollo/client/react';
+import { formatMGRS } from '../utils/coordinates';
 import ImageModal from './ImageModal';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -49,31 +51,54 @@ const ImageMap = () => {
     }
   }, [data]);
 
-  if (loading) return <div>Loading map and images...</div>;
-  if (error) return <div>Error loading images: {error.message}</div>;
+  if (loading) return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      fontSize: '18px',
+      color: '#666'
+    }}>
+      ⏳ Loading map and images...
+    </div>
+  );
+
+  if (error) return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      height: '100%',
+      fontSize: '18px',
+      color: '#dc3545'
+    }}>
+      ⚠️ Error loading images: {error.message}
+    </div>
+  );
 
   const imagesWithLocation = data?.images?.filter(img => img.latitude && img.longitude) || [];
 
   return (
-    <div style={{ height: '500px', width: '100%', marginBottom: '20px' }}>
-      <MapContainer 
-        center={center} 
-        zoom={zoom} 
+    <div style={{ height: '100%', width: '100%' }}>
+      <MapContainer
+        center={center}
+        zoom={zoom}
         style={{ height: '100%', width: '100%' }}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        
+
         {imagesWithLocation.map((image) => (
-          <Marker 
-            key={image.id} 
+          <Marker
+            key={image.id}
             position={[image.latitude, image.longitude]}
           >
             <Popup>
               <div style={{ minWidth: '200px' }}>
-                <img 
+                <img
                   src={`http://localhost:4000${image.filePath}`}
                   alt={image.filename}
                   style={{ width: '100%', maxWidth: '200px', height: 'auto', cursor: 'pointer' }}
@@ -90,15 +115,15 @@ const ImageMap = () => {
                   Image not available
                 </div>
                 <div style={{ marginTop: '10px' }}>
-                  <strong>{image.filename}</strong><br/>
                   {image.captureTimestamp && (
-                    <>Captured: {new Date(image.captureTimestamp).toLocaleString()}<br/></>
+                    <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      📅 {new Date(image.captureTimestamp).toLocaleString()}
+                    </div>
                   )}
-                  {image.cameraMake && image.cameraModel && (
-                    <>Camera: {image.cameraMake} {image.cameraModel}<br/></>
-                  )}
-                  Uploaded: {new Date(image.uploadedAt).toLocaleString()}<br/>
-                  <button 
+                  <div style={{ fontSize: '11px', color: '#999', marginBottom: '8px', fontFamily: 'monospace' }}>
+                    📍 {formatMGRS(image.longitude, image.latitude)}
+                  </div>
+                  <button
                     onClick={() => {
                       setSelectedImage(image);
                       setIsModalOpen(true);
@@ -122,21 +147,21 @@ const ImageMap = () => {
           </Marker>
         ))}
       </MapContainer>
-      
+
       <div style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
         Showing {imagesWithLocation.length} image(s) with location data
         {data?.images?.length > imagesWithLocation.length && (
           <> ({data.images.length - imagesWithLocation.length} without location)</>
         )}
       </div>
-      
-      <ImageModal 
-        image={selectedImage} 
-        isOpen={isModalOpen} 
+
+      <ImageModal
+        image={selectedImage}
+        isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false);
           setSelectedImage(null);
-        }} 
+        }}
       />
     </div>
   );
