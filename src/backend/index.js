@@ -11,6 +11,7 @@ import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js'
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 import { getUserFromAuthHeader } from './src/utils/auth.js';
+import { runMigrations } from './scripts/run-migrations.js';
 
 const startTime = Date.now();
 
@@ -20,6 +21,10 @@ async function initializeDatabase() {
     console.error('Failed to connect to database');
     process.exit(1);
   }
+
+  // Run database migrations
+  console.log('Running database migrations...');
+  await runMigrations();
 }
 
 const resolvers = {

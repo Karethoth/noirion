@@ -83,15 +83,19 @@ async function runMigrations() {
 }
 
 
-// Always run migrations when this script is executed
-runMigrations()
-  .then(() => {
-    console.log('\nMigrations completed successfully');
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error('\nError running migrations:', err);
-    process.exit(1);
-  });
-
+// Export the function for use in other modules
 export { runMigrations };
+
+// Only run migrations when this script is executed directly
+// Check if this module is being run directly (not imported)
+if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}`) {
+  runMigrations()
+    .then(() => {
+      console.log('\nMigrations completed successfully');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('\nError running migrations:', err);
+      process.exit(1);
+    });
+}

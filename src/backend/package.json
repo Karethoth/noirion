@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon --legacy-watch index.js",
     "test": "vitest",
+    "migrate": "node scripts/run-migrations.js",
     "schema:generate": "node scripts/generate-schema.js",
     "schema:check": "graphql-inspector diff schema.graphql 'src/graphql/schemas/schema.js' --require esm"
   },
