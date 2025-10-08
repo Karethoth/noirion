@@ -37,10 +37,14 @@
   }
 
   type User {
-    id: Int
-    username: String
-    email: String
+    id: ID!
+    username: String!
+    email: String!
+    full_name: String
+    role: String!
+    active: Boolean!
     created_at: String
+    updated_at: String
   }
 
   type Image {
