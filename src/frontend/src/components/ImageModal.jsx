@@ -51,7 +51,7 @@ const ADD_REGION = gql`
 
 
 const ImageModal = ({ image, isOpen, onClose }) => {
-  const { data, loading, refetch } = useQuery(GET_ANNOTATIONS, {
+  const { data, refetch } = useQuery(GET_ANNOTATIONS, {
     variables: { assetId: image?.id },
     skip: !image,
     fetchPolicy: 'network-only',
@@ -61,7 +61,6 @@ const ImageModal = ({ image, isOpen, onClose }) => {
   const [deleteAnnotation] = useMutation(DELETE_ANNOTATION);
   const [updateAnnotation] = useMutation(UPDATE_ANNOTATION);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
-  const [newDesc, setNewDesc] = useState('');
 
   // When annotations change, select the first by default if none selected
   useEffect(() => {
@@ -72,34 +71,6 @@ const ImageModal = ({ image, isOpen, onClose }) => {
       setSelectedAnnotationId(null);
     }
   }, [data, selectedAnnotationId]);
-
-  // Create a new annotation
-  const handleNewAnnotation = async (e) => {
-    e.preventDefault();
-    if (!newDesc.trim()) return;
-    const res = await addAnnotation({
-      variables: { input: { assetId: image.id, title: '', description: newDesc, tags: [] } },
-    });
-    setSelectedAnnotationId(res.data.createAnnotation.id);
-    setNewDesc('');
-    refetch();
-  };
-
-  // Add region to selected annotation
-  const handleAnnotationCreate = useCallback(async (region) => {
-    if (!selectedAnnotationId) return;
-    await addRegion({
-      variables: {
-        annotationId: selectedAnnotationId,
-        input: {
-          shapeType: region.shapeType,
-          coordinates: region.coordinates,
-          style: region.style,
-        },
-      },
-    });
-    refetch();
-  }, [selectedAnnotationId, addRegion, refetch]);
 
   // Delete annotation handler
   const handleAnnotationDelete = useCallback(async (annotationId) => {
@@ -132,12 +103,16 @@ const ImageModal = ({ image, isOpen, onClose }) => {
       <div
         style={{
           position: 'relative',
-          maxWidth: '90%',
-          maxHeight: '90%',
-          backgroundColor: 'white',
+          width: '90vw',
+          height: '90vh',
+          maxWidth: '1400px',
+          backgroundColor: '#1a1a1a',
           borderRadius: '8px',
           overflow: 'hidden',
-          cursor: 'default'
+          cursor: 'default',
+          display: 'flex',
+          flexDirection: 'column',
+          border: '1px solid #3a3a3a'
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -164,7 +139,7 @@ const ImageModal = ({ image, isOpen, onClose }) => {
 
 
         {/* Annotation Viewer */}
-        <div style={{ width: '800px', height: '600px', position: 'relative' }}>
+        <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <AnnotationViewer
             image={{ ...image, filePath: `http://localhost:4000${image.filePath}` }}
             annotations={data?.annotations || []}
@@ -210,8 +185,17 @@ const ImageModal = ({ image, isOpen, onClose }) => {
         </div>
 
         {/* Image metadata */}
-        <div style={{ padding: '15px', fontSize: '14px', color: '#333' }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>{image.filename}</h3>
+        <div style={{
+          padding: '15px',
+          fontSize: '14px',
+          color: '#e0e0e0',
+          backgroundColor: '#2a2a2a',
+          borderTop: '1px solid #3a3a3a',
+          flexShrink: 0,
+          maxHeight: '180px',
+          overflowY: 'auto'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', color: '#e0e0e0' }}>{image.filename}</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               {image.captureTimestamp && (

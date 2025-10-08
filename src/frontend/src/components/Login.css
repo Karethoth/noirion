@@ -3,14 +3,15 @@
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
 }
 
 .login-box {
-  background: white;
+  background: #2a2a2a;
   padding: 40px;
   border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  border: 1px solid #3a3a3a;
   width: 100%;
   max-width: 400px;
 }
@@ -18,12 +19,12 @@
 .login-box h2 {
   margin: 0 0 10px 0;
   text-align: center;
-  color: #333;
+  color: #e0e0e0;
 }
 
 .login-subtitle {
   text-align: center;
-  color: #666;
+  color: #999;
   margin-bottom: 30px;
   font-size: 14px;
 }
@@ -35,44 +36,46 @@
 .form-group label {
   display: block;
   margin-bottom: 5px;
-  color: #333;
+  color: #e0e0e0;
   font-weight: 500;
 }
 
 .form-group input {
   width: 100%;
   padding: 12px;
-  border: 1px solid #ddd;
+  border: 1px solid #4a4a4a;
   border-radius: 5px;
   font-size: 14px;
   box-sizing: border-box;
   transition: border-color 0.3s;
+  background: #1a1a1a;
+  color: #e0e0e0;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: #1e5a9e;
 }
 
 .form-group input:disabled {
-  background-color: #f5f5f5;
+  background-color: #252525;
   cursor: not-allowed;
 }
 
 .error-message {
-  background-color: #fee;
-  color: #c33;
+  background-color: #3a1a1a;
+  color: #ff6b6b;
   padding: 10px;
   border-radius: 5px;
   margin-bottom: 15px;
   font-size: 14px;
-  border: 1px solid #fcc;
+  border: 1px solid #5a2a2a;
 }
 
 .login-button {
   width: 100%;
   padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1e5a9e 0%, #2a6bb5 100%);
   color: white;
   border: none;
   border-radius: 5px;
@@ -84,7 +87,7 @@
 
 .login-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 5px 15px rgba(30, 90, 158, 0.4);
 }
 
 .login-button:active:not(:disabled) {
@@ -99,13 +102,13 @@
 .demo-accounts {
   margin-top: 30px;
   padding-top: 20px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid #3a3a3a;
 }
 
 .demo-accounts p {
   margin: 0 0 10px 0;
   font-size: 14px;
-  color: #666;
+  color: #999;
 }
 
 .demo-accounts ul {
@@ -117,12 +120,13 @@
 .demo-accounts li {
   margin: 5px 0;
   font-size: 13px;
-  color: #666;
+  color: #999;
 }
 
 .demo-accounts code {
-  background-color: #f5f5f5;
+  background-color: #1a1a1a;
   padding: 2px 6px;
   border-radius: 3px;
+  color: #e0e0e0;
   font-family: monospace;
 }
