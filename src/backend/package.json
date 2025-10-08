@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "node index.js",
     "dev": "nodemon --legacy-watch index.js",
     "test": "vitest",
     "migrate": "node scripts/run-migrations.js",
