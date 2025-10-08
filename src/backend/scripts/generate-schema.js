@@ -1,5 +1,5 @@
 import { writeFileSync } from 'fs';
-import { typeDefs } from '../src/graphql/schemas/schema.js';
+import { typeDefs } from '../src/graphql/schemas/index.js';
 
 writeFileSync('./schema/schema.graphql', typeDefs);
 
