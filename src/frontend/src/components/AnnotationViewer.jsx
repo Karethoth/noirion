@@ -464,7 +464,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                     title="Delete annotation"
                     style={{ marginLeft: 8, background: 'none', border: 'none', color: '#c00', fontSize: 18, cursor: 'pointer' }}
                     onClick={e => { e.stopPropagation(); onAnnotationDelete && onAnnotationDelete(annotation.id); }}
-                  ></button>
+                  >×</button>
                 )}
               </li>
             );
@@ -632,8 +632,22 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             )}
             {!readOnly && (
               <div className="annotation-details-actions">
-                <button onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}>
-                  Delete
+                <button 
+                  onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}
+                  style={{
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '500'
+                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#c82333'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = '#dc3545'}
+                >
+                  Delete Annotation
                 </button>
               </div>
             )}
