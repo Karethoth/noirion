@@ -6,11 +6,14 @@ import './Login.css';
 const LOGIN_MUTATION = gql`
   mutation Login($username: String!, $password: String!) {
     login(username: $username, password: $password) {
-      id
-      username
-      email
-      full_name
-      role
+      token
+      user {
+        id
+        username
+        email
+        full_name
+        role
+      }
     }
   }
 `;
@@ -23,9 +26,10 @@ const Login = ({ onLoginSuccess }) => {
   const [login, { loading }] = useMutation(LOGIN_MUTATION, {
     onCompleted: (data) => {
       setError('');
-      // Store user info in localStorage
-      localStorage.setItem('user', JSON.stringify(data.login));
-      onLoginSuccess(data.login);
+      // Store token and user info in localStorage
+      localStorage.setItem('token', data.login.token);
+      localStorage.setItem('user', JSON.stringify(data.login.user));
+      onLoginSuccess(data.login.user);
     },
     onError: (err) => {
       setError(err.message);
@@ -52,8 +56,6 @@ const Login = ({ onLoginSuccess }) => {
     <div className="login-container">
       <div className="login-box">
         <h2>🔍 Noirion Login</h2>
-        <p className="login-subtitle">Image Investigation Platform</p>
-
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="username">Username</label>
@@ -90,11 +92,13 @@ const Login = ({ onLoginSuccess }) => {
         <div className="demo-accounts">
           <p><strong>Demo Accounts:</strong></p>
           <ul>
-            <li><code>admin_user</code> / password</li>
-            <li><code>investigator_user</code> / password</li>
-            <li><code>analyst_user</code> / password</li>
-            <li><code>readonly_user</code> / password</li>
+            <li><code>admin</code> / password (full access)</li>
+            <li><code>investigator</code> / password (can edit)</li>
+            <li><code>analyst</code> / password (read-only)</li>
           </ul>
+          <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
+            Note: Backend currently has no authentication enforcement. Login is for role-based UI only.
+          </p>
         </div>
       </div>
     </div>

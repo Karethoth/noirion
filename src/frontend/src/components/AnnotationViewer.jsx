@@ -499,7 +499,14 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             <button onClick={handleZoomIn} title="Zoom In">+</button>
             <button onClick={handleResetZoom} title="Reset View">Reset</button>
           </div>
-          <span className="tool-hint">Ctrl+drag or middle mouse to pan, scroll to zoom</span>
+          {readOnly && (
+            <span className="tool-hint" style={{ color: '#ffc107', fontWeight: 600 }}>
+              Read-Only Mode - Viewing only
+            </span>
+          )}
+          {!readOnly && (
+            <span className="tool-hint">Ctrl+drag or middle mouse to pan, scroll to zoom</span>
+          )}
         </div>
 
         <div

@@ -50,7 +50,7 @@ const ADD_REGION = gql`
 `;
 
 
-const ImageModal = ({ image, isOpen, onClose }) => {
+const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
   const { data, refetch } = useQuery(GET_ANNOTATIONS, {
     variables: { assetId: image?.id },
     skip: !image,
@@ -143,6 +143,7 @@ const ImageModal = ({ image, isOpen, onClose }) => {
           <AnnotationViewer
             image={{ ...image, filePath: `http://localhost:4000${image.filePath}` }}
             annotations={data?.annotations || []}
+            readOnly={readOnly}
             onAnnotationCreate={async (input, opts) => {
               // If opts.edit, update existing annotation, else create new
               if (opts && opts.edit && input.id) {
@@ -180,7 +181,6 @@ const ImageModal = ({ image, isOpen, onClose }) => {
               refetch();
             }}
             onAnnotationDelete={handleAnnotationDelete}
-            readOnly={false}
           />
         </div>
 

@@ -52,6 +52,20 @@
   gap: 20px;
 }
 
+.read-only-badge {
+  padding: 8px 16px;
+  background-color: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: help;
+}
+
 .user-info {
   display: flex;
   flex-direction: column;

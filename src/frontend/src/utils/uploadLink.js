@@ -43,6 +43,12 @@ export const createUploadLink = (options) => {
         'apollo-require-preflight': 'true', // Required for CSRF protection
       };
 
+      // Add Authorization header if token exists in localStorage
+      const token = localStorage.getItem('token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       if (files.size === 0) {
         // Standard GraphQL request
         body = JSON.stringify({

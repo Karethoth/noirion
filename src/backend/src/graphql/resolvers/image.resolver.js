@@ -1,21 +1,25 @@
 import { AssetsService } from '../../services/assets.js';
 import { GraphQLUpload } from 'graphql-upload-minimal';
+import { requireAuth, requirePermission } from '../../utils/auth.js';
 
 const imageResolvers = {
   Upload: GraphQLUpload,
 
   Query: {
     images: async (parent, args, context) => {
+      requireAuth(context.user);
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAllAssets();
     },
 
     image: async (parent, args, context) => {
+      requireAuth(context.user);
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAssetById(args.id);
     },
 
     imagesInArea: async (parent, args, context) => {
+      requireAuth(context.user);
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAssetsInArea(args.bounds);
     }
@@ -23,6 +27,8 @@ const imageResolvers = {
 
   Mutation: {
     uploadImage: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+      
       const { file } = args;
       const { createReadStream, filename, mimetype } = await file;
 
@@ -46,6 +52,8 @@ const imageResolvers = {
     },
 
     uploadImages: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+      
       const { files } = args;
       const assetsService = new AssetsService(context.dbPool);
       const results = [];
@@ -77,6 +85,8 @@ const imageResolvers = {
     },
 
     deleteImage: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+      
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.deleteAsset(args.id);
     }

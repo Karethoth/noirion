@@ -15,6 +15,8 @@ const client = new ApolloClient({
 })
 
 function MainApp({ user, onLogout }) {
+  const canWrite = user.role === 'admin' || user.role === 'investigator';
+  
   return (
     <div className="main-app">
       {/* Top Navigation Bar */}
@@ -24,7 +26,12 @@ function MainApp({ user, onLogout }) {
           <span className="nav-title">Noirion</span>
         </div>
         <div className="nav-actions">
-          <ImageUpload />
+          {canWrite && <ImageUpload />}
+          {!canWrite && (
+            <div className="read-only-badge" title="Your role has read-only access">
+              Read-Only
+            </div>
+          )}
           <div className="user-info">
             <span className="user-name">{user.full_name || user.username}</span>
             <span className="user-role">{user.role}</span>
@@ -37,7 +44,7 @@ function MainApp({ user, onLogout }) {
 
       {/* Full-screen Map */}
       <div className="map-container">
-        <ImageMap />
+        <ImageMap userRole={user.role} />
       </div>
     </div>
   )

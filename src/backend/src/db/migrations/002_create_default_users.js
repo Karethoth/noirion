@@ -6,31 +6,25 @@ export const up = async (pgClient) => {
   try {
     const users = [
       {
-        username: 'investigator_user',
+        username: 'investigator',
         email: 'investigator@noirion.dev',
         full_name: 'Investigator User',
         role: 'investigator'
       },
       {
-        username: 'admin_user',
+        username: 'admin',
         email: 'admin@noirion.dev',
         full_name: 'Administrator',
         role: 'admin'
       },
       {
-        username: 'analyst_user',
+        username: 'analyst',
         email: 'analyst@noirion.dev',
         full_name: 'Data Analyst',
         role: 'analyst'
-      },
-      {
-        username: 'readonly_user',
-        email: 'readonly@noirion.dev',
-        full_name: 'Read-only User',
-        role: 'readonly'
       }
     ];
-    
+
     // Create each user with a unique password hash
     for (const user of users) {
       const password_hash = await hashPassword(password);
@@ -40,7 +34,7 @@ export const up = async (pgClient) => {
         [user.username, user.email, user.full_name, user.role, password_hash]
       );
     }
-    
+
     console.log('Default users created successfully');
   } catch (error) {
     console.error('Error creating default users:', error);
@@ -51,7 +45,7 @@ export const up = async (pgClient) => {
 export const down = async (pgClient) => {
   try {
     // Delete the default users we created
-    await pgClient.query(`DELETE FROM users WHERE username IN ('investigator_user', 'admin_user', 'analyst_user', 'readonly_user')`);
+    await pgClient.query(`DELETE FROM users WHERE username IN ('investigator', 'admin', 'analyst')`);
     console.log('Default users deleted successfully');
   } catch (error) {
     console.error('Error deleting default users:', error);

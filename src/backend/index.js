@@ -10,6 +10,7 @@ import imageResolvers from './src/graphql/resolvers/image.resolver.js';
 import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
+import { getUserFromAuthHeader } from './src/utils/auth.js';
 
 const startTime = Date.now();
 
@@ -103,10 +104,19 @@ async function startServer() {
 
       const httpGraphQLResponse = await server.executeHTTPGraphQLRequest({
         httpGraphQLRequest,
-        context: async () => ({
-          dbPool: pool,
-          req,
-        }),
+        context: async () => {
+          // Extract user from Authorization header
+          const authHeader = req.headers.authorization;
+          const user = getUserFromAuthHeader(authHeader);
+          
+          return {
+            dbPool: pool,
+            req,
+            user,
+            userId: user?.userId || null,
+            userRole: user?.role || null
+          };
+        },
       });
 
       for (const [key, value] of httpGraphQLResponse.headers) {

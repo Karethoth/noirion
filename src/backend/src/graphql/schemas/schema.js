@@ -14,7 +14,7 @@ export const typeDefs = `#graphql
   }
 
   type Mutation {
-    login(username: String!, password: String!): User
+    login(username: String!, password: String!): AuthPayload!
     createUser(username: String!, email: String!, password: String!): User
     updateUser(id: Int!, username: String, email: String): User
     deleteUser(id: Int!): Boolean
@@ -29,6 +29,11 @@ export const typeDefs = `#graphql
     addAnnotationRegion(annotationId: ID!, input: AddRegionInput!): AnnotationRegion!
     updateAnnotationRegion(id: ID!, input: UpdateRegionInput!): AnnotationRegion!
     deleteAnnotationRegion(id: ID!): Boolean!
+  }
+
+  type AuthPayload {
+    token: String!
+    user: User!
   }
 
   type User {

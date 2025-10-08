@@ -1,5 +1,6 @@
 import { User } from '../models/User.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
+import { generateToken } from '../utils/auth.js';
 
 export class UsersService {
   constructor(dbPool) {
@@ -58,7 +59,14 @@ export class UsersService {
 
       // Don't return password_hash
       const { password_hash, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      
+      // Generate JWT token
+      const token = generateToken(userWithoutPassword);
+      
+      return {
+        token,
+        user: userWithoutPassword
+      };
     } catch (error) {
       console.error('Error in login service:', error);
       throw error;

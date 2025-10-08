@@ -19,6 +19,7 @@
     "graphql-tag": "^2.12.6",
     "graphql-type-json": "^0.3.2",
     "graphql-upload-minimal": "^1.6.1",
+    "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "pg": "^8.11.0",
     "sharp": "^0.34.4"

@@ -52,13 +52,15 @@ function FitBounds({ images, hasInitialized }) {
   return null;
 }
 
-const ImageMap = () => {
+const ImageMap = ({ userRole }) => {
   const { loading, error, data } = useQuery(GET_IMAGES);
   const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
+  
+  const canWrite = userRole === 'admin' || userRole === 'investigator';
 
   const handleDeleteImage = async (imageId) => {
     if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
@@ -182,22 +184,24 @@ const ImageMap = () => {
                   >
                     View Full Size
                   </button>
-                  <button
-                    onClick={() => handleDeleteImage(image.id)}
-                    style={{
-                      marginTop: '5px',
-                      marginLeft: '5px',
-                      padding: '5px 10px',
-                      backgroundColor: '#dc3545',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '3px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
-                    }}
-                  >
-                    Delete
-                  </button>
+                  {canWrite && (
+                    <button
+                      onClick={() => handleDeleteImage(image.id)}
+                      style={{
+                        marginTop: '5px',
+                        marginLeft: '5px',
+                        padding: '5px 10px',
+                        backgroundColor: '#dc3545',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '3px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             </Popup>
@@ -219,6 +223,7 @@ const ImageMap = () => {
           setIsModalOpen(false);
           setSelectedImage(null);
         }}
+        readOnly={!canWrite}
       />
     </div>
   );
