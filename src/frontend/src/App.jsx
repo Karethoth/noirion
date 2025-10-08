@@ -42,7 +42,7 @@ function MainApp({ user, onLogout }) {
 
       {/* Full-screen Map */}
       <div className="map-container">
-        <ImageMap userRole={user.role} />
+        <ImageMap key="image-map" userRole={user.role} />
       </div>
     </div>
   )

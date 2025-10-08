@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { gql } from '@apollo/client';
 import { useQuery, useMutation } from '@apollo/client/react';
@@ -7,6 +7,12 @@ import ImageModal from './ImageModal';
 import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
+
+// Module-level flag to ensure bounds fitting happens only once per page load
+let hasEverFitBounds = false;
+
+// Save/restore map position across component remounts
+let savedMapView = null;
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -47,17 +53,46 @@ function FitBounds({ images, hasInitialized }) {
   const map = useMap();
 
   useEffect(() => {
-    if (images.length > 0 && !hasInitialized.current) {
+    // Triple protection: module-level flag, component ref, and check for images
+    if (!hasEverFitBounds && !hasInitialized.current && images.length > 0) {
       const bounds = L.latLngBounds(images.map(img => [img.latitude, img.longitude]));
-      map.fitBounds(bounds, { padding: [50, 50] });
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
       hasInitialized.current = true;
+      hasEverFitBounds = true; // Set module-level flag
     }
-  }, [images, map, hasInitialized]);
+    // Only run on mount by excluding images from dependencies
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
 
   return null;
 }
 
-// Component to apply map style class to container
+// Component to save map view across remounts
+function ViewPersistence() {
+  const map = useMap();
+
+  useEffect(() => {
+    // Save view on any change (after initial bounds fit)
+    const saveView = () => {
+      if (hasEverFitBounds) {
+        savedMapView = {
+          center: map.getCenter(),
+          zoom: map.getZoom()
+        };
+      }
+    };
+
+    map.on('moveend', saveView);
+    map.on('zoomend', saveView);
+
+    return () => {
+      map.off('moveend', saveView);
+      map.off('zoomend', saveView);
+    };
+  }, [map]);
+
+  return null;
+}// Component to apply map style class to container
 function MapStyleController({ style }) {
   const map = useMap();
 
@@ -96,7 +131,10 @@ const MAP_STYLES = {
 };
 
 const ImageMap = ({ userRole }) => {
-  const { loading, error, data } = useQuery(GET_IMAGES);
+  const { loading, error, data } = useQuery(GET_IMAGES, {
+    fetchPolicy: 'cache-and-network', // Use cache first, then update in background
+    nextFetchPolicy: 'cache-first', // After first fetch, prefer cache
+  });
   const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,6 +151,74 @@ const ImageMap = ({ userRole }) => {
   useEffect(() => {
     localStorage.setItem('mapStyle', mapStyle);
   }, [mapStyle]);
+
+  // Memoize images with location to avoid recreating on every render
+  const imagesWithLocation = useMemo(() => {
+    return data?.images?.filter(img => img.latitude && img.longitude) || [];
+  }, [data?.images]);
+
+  // Calculate distance between two coordinates in meters (Haversine formula)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  };
+
+  // Group images by proximity (within 50 meters)
+  const imageGroups = useMemo(() => {
+    const groups = [];
+    const processed = new Set();
+    const CLUSTER_DISTANCE = 50; // meters
+
+    imagesWithLocation.forEach((image, idx) => {
+      if (processed.has(idx)) return;
+
+      const group = {
+        lat: image.latitude,
+        lng: image.longitude,
+        images: [image]
+      };
+      processed.add(idx);
+
+      // Find all other images within CLUSTER_DISTANCE
+      imagesWithLocation.forEach((otherImage, otherIdx) => {
+        if (processed.has(otherIdx)) return;
+
+        const distance = calculateDistance(
+          image.latitude,
+          image.longitude,
+          otherImage.latitude,
+          otherImage.longitude
+        );
+
+        if (distance <= CLUSTER_DISTANCE) {
+          group.images.push(otherImage);
+          processed.add(otherIdx);
+        }
+      });
+
+      // Calculate center of group (average position)
+      if (group.images.length > 1) {
+        const latSum = group.images.reduce((sum, img) => sum + img.latitude, 0);
+        const lngSum = group.images.reduce((sum, img) => sum + img.longitude, 0);
+        group.lat = latSum / group.images.length;
+        group.lng = lngSum / group.images.length;
+      }
+
+      groups.push(group);
+    });
+
+    return groups;
+  }, [imagesWithLocation]);
 
   const handleDeleteImage = async (imageId) => {
     if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
@@ -169,13 +275,18 @@ const ImageMap = ({ userRole }) => {
     </div>
   );
 
-  const imagesWithLocation = data?.images?.filter(img => img.latitude && img.longitude) || [];
   const currentStyle = MAP_STYLES[mapStyle];
 
-  // Debug: Log first image to check annotations
-  if (imagesWithLocation.length > 0) {
-    console.log('First image with annotations:', imagesWithLocation[0].annotations);
-  }
+  // Create custom numbered marker icon
+  const createNumberedIcon = (count) => {
+    return L.divIcon({
+      className: 'custom-marker-cluster',
+      html: `<div class="marker-cluster-inner">${count}</div>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 40],
+      popupAnchor: [0, -40]
+    });
+  };
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
@@ -194,8 +305,8 @@ const ImageMap = ({ userRole }) => {
 
       <MapContainer
         key="main-map"
-        center={[60.1699, 24.9384]}
-        zoom={10}
+        center={savedMapView?.center || [60.1699, 24.9384]}
+        zoom={savedMapView?.zoom || 10}
         style={{ height: '100%', width: '100%' }}
         ref={mapRef}
       >
@@ -205,14 +316,49 @@ const ImageMap = ({ userRole }) => {
           url={currentStyle.url}
         />
         <MapStyleController style={mapStyle} />
-        <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
+        {!hasInitializedBounds.current && (
+          <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
+        )}
+        <ViewPersistence />
 
-        {imagesWithLocation.map((image) => (
-          <Marker
-            key={image.id}
-            position={[image.latitude, image.longitude]}
-          >
-            <Popup maxWidth={280} minWidth={260}>
+        {imageGroups.flatMap((group, groupIdx) => {
+          const count = group.images.length;
+          const markers = [];
+
+          // Add numbered marker at center if multiple images
+          if (count > 1) {
+            markers.push(
+              <Marker
+                key={`group-${groupIdx}`}
+                position={[group.lat, group.lng]}
+                icon={createNumberedIcon(count)}
+                eventHandlers={{
+                  click: () => {
+                    // Click will show popup, but marker is not interactive
+                  }
+                }}
+              />
+            );
+          }
+
+          // Add individual image markers
+          group.images.forEach((image, imgIdx) => {
+            let lat = image.latitude;
+            let lng = image.longitude;
+
+            if (count > 1) {
+              const radius = 0.0003; // ~33 meters - increased for better clickability
+              const angle = (imgIdx / count) * 2 * Math.PI;
+              lat += radius * Math.cos(angle);
+              lng += radius * Math.sin(angle);
+            }
+
+            markers.push(
+            <Marker
+              key={`marker-${groupIdx}-${image.id}`}
+              position={[lat, lng]}
+            >
+              <Popup maxWidth={280} minWidth={260}>
               <div style={{ padding: '4px' }}>
                 {/* Image Preview */}
                 <div style={{
@@ -318,7 +464,11 @@ const ImageMap = ({ userRole }) => {
               </div>
             </Popup>
           </Marker>
-        ))}
+            );
+          });
+
+          return markers;
+        })}
       </MapContainer>
 
       {/* Map Info Overlay */}
@@ -342,4 +492,4 @@ const ImageMap = ({ userRole }) => {
   );
 };
 
-export default ImageMap;
+export default React.memo(ImageMap);

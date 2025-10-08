@@ -225,3 +225,36 @@
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
+
+/* Custom numbered marker cluster */
+.custom-marker-cluster {
+  background: transparent;
+  border: none;
+  z-index: 1 !important; /* Render below regular markers */
+}
+
+.marker-cluster-inner {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  border: 3px solid white;
+  border-radius: 8px;
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+  position: relative;
+  pointer-events: none; /* Make non-interactive */
+}
+
+.marker-cluster-inner::before {
+  content: '📸';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  font-size: 10px;
+  opacity: 0.7;
+}

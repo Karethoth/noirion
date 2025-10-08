@@ -52,9 +52,11 @@ const GET_IMAGES = gql`
 const ImageUpload = () => {
   const [uploadImage] = useMutation(UPLOAD_IMAGE, {
     refetchQueries: [{ query: GET_IMAGES }],
+    awaitRefetchQueries: false, // Don't wait for refetch to complete
   });
   const [uploadImages] = useMutation(UPLOAD_IMAGES, {
     refetchQueries: [{ query: GET_IMAGES }],
+    awaitRefetchQueries: false, // Don't wait for refetch to complete
   });
 
   const [uploading, setUploading] = useState(false);
