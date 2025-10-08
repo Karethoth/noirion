@@ -148,3 +148,80 @@
   color: #1a1a2e;
   font-weight: 600;
 }
+
+/* Popup metadata styling */
+.popup-metadata {
+  margin-bottom: 10px;
+}
+
+.popup-timestamp,
+.popup-filename,
+.popup-coordinates {
+  font-size: 12px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Light mode colors */
+.popup-timestamp {
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+.popup-filename {
+  color: #495057;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.popup-coordinates {
+  color: #6c757d;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+/* Dark mode colors */
+.map-style-night .popup-timestamp,
+.map-style-satellite .popup-timestamp {
+  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-style-night .popup-filename,
+.map-style-satellite .popup-filename {
+  color: #b0b0b0;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.map-style-night .popup-coordinates,
+.map-style-satellite .popup-coordinates {
+  color: #90a0b0;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Tags styling */
+.popup-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.popup-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* Dark mode tags */
+.map-style-night .popup-tag,
+.map-style-satellite .popup-tag {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}

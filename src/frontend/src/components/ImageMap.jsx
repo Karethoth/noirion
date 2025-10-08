@@ -28,6 +28,10 @@ const GET_IMAGES = gql`
       cameraMake
       cameraModel
       uploadedAt
+      annotations {
+        id
+        tags
+      }
     }
   }
 `;
@@ -96,11 +100,19 @@ const ImageMap = ({ userRole }) => {
   const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [mapStyle, setMapStyle] = useState('day');
+  const [mapStyle, setMapStyle] = useState(() => {
+    // Load saved map style from localStorage, default to 'day'
+    return localStorage.getItem('mapStyle') || 'day';
+  });
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
 
   const canWrite = userRole === 'admin' || userRole === 'investigator';
+
+  // Save map style to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('mapStyle', mapStyle);
+  }, [mapStyle]);
 
   const handleDeleteImage = async (imageId) => {
     if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
@@ -159,6 +171,11 @@ const ImageMap = ({ userRole }) => {
 
   const imagesWithLocation = data?.images?.filter(img => img.latitude && img.longitude) || [];
   const currentStyle = MAP_STYLES[mapStyle];
+
+  // Debug: Log first image to check annotations
+  if (imagesWithLocation.length > 0) {
+    console.log('First image with annotations:', imagesWithLocation[0].annotations);
+  }
 
   return (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
@@ -231,35 +248,24 @@ const ImageMap = ({ userRole }) => {
                 </div>
 
                 {/* Metadata */}
-                <div style={{ marginBottom: '10px' }}>
+                <div className="popup-metadata">
                   {image.captureTimestamp && (
-                    <div style={{
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      marginBottom: '6px',
-                      color: '#333'
-                    }}>
-                      {new Date(image.captureTimestamp).toLocaleString()}
+                    <div className="popup-timestamp">
+                      📅 {new Date(image.captureTimestamp).toLocaleString()}
                     </div>
                   )}
-                  <div style={{
-                    fontSize: '11px',
-                    color: '#666',
-                    fontFamily: 'monospace',
-                    backgroundColor: '#f8f8f8',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    marginBottom: '8px'
-                  }}>
-                    {formatMGRS(image.longitude, image.latitude)}
+                  <div className="popup-coordinates">
+                    📍 {formatMGRS(image.longitude, image.latitude)}
                   </div>
-                  {image.cameraMake && image.cameraModel && (
-                    <div style={{
-                      fontSize: '11px',
-                      color: '#888',
-                      marginBottom: '4px'
-                    }}>
-                      {image.cameraMake} {image.cameraModel}
+
+                  {/* Tags */}
+                  {image.annotations && image.annotations.length > 0 && (
+                    <div className="popup-tags">
+                      {Array.from(new Set(image.annotations.flatMap(ann => ann.tags || []))).map((tag, idx) => (
+                        <span key={idx} className="popup-tag">
+                          {tag}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

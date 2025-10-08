@@ -5,6 +5,56 @@ import { requireAuth, requirePermission } from '../../utils/auth.js';
 const imageResolvers = {
   Upload: GraphQLUpload,
 
+  Image: {
+    annotations: async (parent, args, context) => {
+      try {
+        requireAuth(context.user);
+
+        // Fetch annotations for this image
+        const annotationsResult = await context.dbPool.query(
+          'SELECT * FROM annotations WHERE asset_id = $1 ORDER BY created_at DESC',
+          [parent.id]
+        );
+
+        if (!annotationsResult || !annotationsResult.rows) {
+          return [];
+        }
+
+        // For each annotation, fetch its tags
+        const annotations = await Promise.all(
+          annotationsResult.rows.map(async (row) => {
+            const tagsResult = await context.dbPool.query(
+              `SELECT t.type, t.value, t.name
+               FROM tags t
+               JOIN annotation_tags at ON t.id = at.tag_id
+               WHERE at.annotation_id = $1`,
+              [row.id]
+            );
+
+            const tags = tagsResult.rows.map(tag => tag.name || tag.value);
+
+            return {
+              id: row.id,
+              assetId: row.asset_id,
+              createdBy: row.created_by,
+              title: row.title,
+              description: row.description,
+              tags: tags,
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+              metadata: row.metadata
+            };
+          })
+        );
+
+        return annotations;
+      } catch (error) {
+        console.error('Error fetching annotations for image:', parent.id, error);
+        return [];
+      }
+    }
+  },
+
   Query: {
     images: async (parent, args, context) => {
       requireAuth(context.user);

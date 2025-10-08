@@ -102,6 +102,9 @@ export const typeDefs = `#graphql
     # Full EXIF and metadata
     exifData: JSON
     metadata: JSON
+
+    # Relationships
+    annotations: [Annotation!]!
   }
 
   input BoundsInput {

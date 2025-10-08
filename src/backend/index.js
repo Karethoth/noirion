@@ -46,6 +46,7 @@ const resolvers = {
     ...imageResolvers.Mutation,
     ...annotationResolvers.Mutation
   },
+  Image: imageResolvers.Image,
   Annotation: annotationResolvers.Annotation
 };
 
