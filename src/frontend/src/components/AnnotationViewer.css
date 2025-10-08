@@ -218,6 +218,18 @@
   border-radius: 3px;
   font-size: 12px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+
+.annotation-tags .tag .tag-type {
+  font-weight: 600;
+}
+
+.annotation-tags .tag .tag-value {
+  font-weight: 400;
+  opacity: 0.9;
+  margin-left: 2px;
 }
 
 .annotation-details-actions {

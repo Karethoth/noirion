@@ -4,6 +4,12 @@ import './AnnotationViewer.css';
 /**
  * AnnotationViewer - A React component for viewing images with annotation support
  * Supports drawing boxes, polygons, and freehand shapes on images with zoom and pan
+ *
+ * Tagging System:
+ * - Simple tags: #tagname (e.g., #vehicle, #person)
+ * - Type:Value tags: #type:value (e.g., #car:FLJ-191, #license_plate:ABC-123)
+ * - Supports alphanumeric characters, hyphens (-), and underscores (_)
+ * - Examples: #vehicle-type:sedan, #license_plate:XYZ-789, #building_type:residential
  */
 const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId }) => {
   const canvasRef = useRef(null);
@@ -291,7 +297,12 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   }, [pendingRegion]);
 
   function extractTags(desc) {
-    return (desc.match(/#\w+/g) || []).map(t => t.slice(1));
+    // Match tags with format: #tagtype or #tagtype:value
+    // Supports alphanumeric, hyphens, underscores, and colons
+    // Examples: #car, #car:XXX-NNN, #license_plate:ABC-123, #vehicle-type:sedan
+    const tagRegex = /#([\w-]+(?::[\w-]+)?)/g;
+    const matches = desc.match(tagRegex) || [];
+    return matches.map(t => t.slice(1)); // Remove the # prefix
   }
 
   const handleMetadataSubmit = (e) => {
@@ -600,9 +611,16 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             <p>{selectedRegion.description}</p>
             {selectedRegion.tags && selectedRegion.tags.length > 0 && (
               <div className="annotation-tags">
-                {selectedRegion.tags.map((tag, idx) => (
-                  <span key={idx} className="tag">{tag}</span>
-                ))}
+                {selectedRegion.tags.map((tag, idx) => {
+                  // Split tag into type and value if it contains a colon
+                  const [tagType, tagValue] = tag.includes(':') ? tag.split(':', 2) : [tag, null];
+                  return (
+                    <span key={idx} className="tag">
+                      <span className="tag-type">{tagType}</span>
+                      {tagValue && <span className="tag-value">: {tagValue}</span>}
+                    </span>
+                  );
+                })}
               </div>
             )}
             {!readOnly && (

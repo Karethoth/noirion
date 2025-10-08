@@ -20,6 +20,7 @@ export const typeDefs = `#graphql
     deleteUser(id: Int!): Boolean
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
+    deleteImage(id: ID!): Boolean!
 
     # Annotation mutations
     createAnnotation(input: CreateAnnotationInput!): Annotation!

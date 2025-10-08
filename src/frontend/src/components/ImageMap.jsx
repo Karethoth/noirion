@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import React, { useEffect, useState, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { gql } from '@apollo/client';
-import { useQuery } from '@apollo/client/react';
+import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import ImageModal from './ImageModal';
 import 'leaflet/dist/leaflet.css';
@@ -31,25 +31,63 @@ const GET_IMAGES = gql`
   }
 `;
 
+const DELETE_IMAGE = gql`
+  mutation DeleteImage($id: ID!) {
+    deleteImage(id: $id)
+  }
+`;
+
+// Component to fit bounds to all markers on initial load only
+function FitBounds({ images, hasInitialized }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (images.length > 0 && !hasInitialized.current) {
+      const bounds = L.latLngBounds(images.map(img => [img.latitude, img.longitude]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+      hasInitialized.current = true;
+    }
+  }, [images, map, hasInitialized]);
+
+  return null;
+}
+
 const ImageMap = () => {
   const { loading, error, data } = useQuery(GET_IMAGES);
-  const [center, setCenter] = useState([60.1699, 24.9384]); // Default to Helsinki
-  const [zoom, setZoom] = useState(10);
+  const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const hasInitializedBounds = useRef(false);
+  const mapRef = useRef(null);
 
-  // Update map center when images are loaded
-  useEffect(() => {
-    if (data?.images?.length > 0) {
-      const imagesWithLocation = data.images.filter(img => img.latitude && img.longitude);
-      if (imagesWithLocation.length > 0) {
-        // Center on first image with location
-        const firstImage = imagesWithLocation[0];
-        setCenter([firstImage.latitude, firstImage.longitude]);
-        setZoom(13);
-      }
+  const handleDeleteImage = async (imageId) => {
+    if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
+      return;
     }
-  }, [data]);
+
+    try {
+      await deleteImage({
+        variables: { id: imageId },
+        update: (cache) => {
+          // Read the current data from the cache
+          const existingData = cache.readQuery({ query: GET_IMAGES });
+
+          if (existingData) {
+            // Filter out the deleted image
+            const updatedImages = existingData.images.filter(img => img.id !== imageId);
+
+            // Write the updated data back to the cache
+            cache.writeQuery({
+              query: GET_IMAGES,
+              data: { images: updatedImages }
+            });
+          }
+        }
+      });
+    } catch (err) {
+      alert(`Failed to delete image: ${err.message}`);
+    }
+  };
 
   if (loading) return (
     <div style={{
@@ -82,14 +120,17 @@ const ImageMap = () => {
   return (
     <div style={{ height: '100%', width: '100%' }}>
       <MapContainer
-        center={center}
-        zoom={zoom}
+        key="main-map"
+        center={[60.1699, 24.9384]}
+        zoom={10}
         style={{ height: '100%', width: '100%' }}
+        ref={mapRef}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
 
         {imagesWithLocation.map((image) => (
           <Marker
@@ -140,6 +181,22 @@ const ImageMap = () => {
                     }}
                   >
                     View Full Size
+                  </button>
+                  <button
+                    onClick={() => handleDeleteImage(image.id)}
+                    style={{
+                      marginTop: '5px',
+                      marginLeft: '5px',
+                      padding: '5px 10px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                      fontSize: '12px'
+                    }}
+                  >
+                    Delete
                   </button>
                 </div>
               </div>

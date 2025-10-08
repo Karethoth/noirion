@@ -347,6 +347,47 @@ export class AssetsService {
     }
   }
 
+  async deleteAsset(id) {
+    const client = await this.dbPool.connect();
+    try {
+      // Hard delete - delete associated data first due to foreign key constraints
+
+      // Delete annotation regions first
+      await client.query(
+        `DELETE FROM annotation_regions WHERE annotation_id IN (
+          SELECT id FROM annotations WHERE asset_id = $1
+        )`,
+        [id]
+      );
+
+      // Delete annotations
+      await client.query(
+        `DELETE FROM annotations WHERE asset_id = $1`,
+        [id]
+      );
+
+      // Delete asset metadata
+      await client.query(
+        `DELETE FROM asset_metadata_exif WHERE asset_id = $1`,
+        [id]
+      );
+
+      // Finally delete the asset itself
+      const result = await client.query(
+        `DELETE FROM assets WHERE id = $1 RETURNING id`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Image not found');
+      }
+
+      return true;
+    } finally {
+      client.release();
+    }
+  }
+
   formatAssetResult(row) {
     return {
       id: row.id,

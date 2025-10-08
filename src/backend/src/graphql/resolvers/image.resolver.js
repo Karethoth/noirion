@@ -74,6 +74,11 @@ const imageResolvers = {
       }
 
       return results;
+    },
+
+    deleteImage: async (parent, args, context) => {
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.deleteAsset(args.id);
     }
   }
 };
