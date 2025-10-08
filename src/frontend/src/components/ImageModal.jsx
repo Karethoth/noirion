@@ -141,7 +141,7 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
         {/* Annotation Viewer */}
         <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <AnnotationViewer
-            image={{ ...image, filePath: `http://localhost:4000${image.filePath}` }}
+            image={{ ...image, filePath: `${import.meta.env.VITE_API_URL}${image.filePath}` }}
             annotations={data?.annotations || []}
             readOnly={readOnly}
             onAnnotationCreate={async (input, opts) => {

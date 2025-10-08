@@ -59,7 +59,7 @@ const ImageMap = ({ userRole }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
-  
+
   const canWrite = userRole === 'admin' || userRole === 'investigator';
 
   const handleDeleteImage = async (imageId) => {
@@ -142,7 +142,7 @@ const ImageMap = ({ userRole }) => {
             <Popup>
               <div style={{ minWidth: '200px' }}>
                 <img
-                  src={`http://localhost:4000${image.filePath}`}
+                  src={`${import.meta.env.VITE_API_URL}${image.filePath}`}
                   alt={image.filename}
                   style={{ width: '100%', maxWidth: '200px', height: 'auto', cursor: 'pointer' }}
                   onClick={() => {

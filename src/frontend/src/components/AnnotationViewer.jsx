@@ -18,7 +18,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const descriptionTextareaRef = useRef(null);
 
   // Ensure image src is absolute if needed
-  const backendUrl = 'http://localhost:4000';
+  const backendUrl = import.meta.env.VITE_API_URL;
   const imageSrc = image?.filePath?.startsWith('http') ? image.filePath : `${backendUrl}${image.filePath || ''}`;
 
   const [currentTool, setCurrentTool] = useState('select');

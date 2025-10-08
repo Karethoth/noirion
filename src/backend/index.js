@@ -108,7 +108,7 @@ async function startServer() {
           // Extract user from Authorization header
           const authHeader = req.headers.authorization;
           const user = getUserFromAuthHeader(authHeader);
-          
+
           return {
             dbPool: pool,
             req,

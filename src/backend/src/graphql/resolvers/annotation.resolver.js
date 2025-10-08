@@ -9,14 +9,14 @@ const annotationResolvers = {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getAnnotationsByAssetId(args.assetId);
     },
-    
+
     annotation: async (parent, args, context) => {
       requireAuth(context.user);
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getAnnotationById(args.id);
     }
   },
-  
+
   Mutation: {
     createAnnotation: async (parent, args, context) => {
       requirePermission(context.user, 'write');
@@ -27,7 +27,7 @@ const annotationResolvers = {
         args.input
       );
     },
-    
+
     updateAnnotation: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
@@ -37,43 +37,43 @@ const annotationResolvers = {
         args.input
       );
     },
-    
+
     deleteAnnotation: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.deleteAnnotation(args.id, context.userId);
     },
-    
+
     addAnnotationRegion: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.addRegion(args.annotationId, args.input);
     },
-    
+
     updateAnnotationRegion: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.updateRegion(args.id, args.input);
     },
-    
+
     deleteAnnotationRegion: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.deleteRegion(args.id);
     }
   },
-  
+
   Annotation: {
     asset: async (parent, args, context) => {
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAssetById(parent.assetId);
     },
-    
+
     regions: async (parent, args, context) => {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getRegionsByAnnotationId(parent.id);
     },
-    
+
     entityLinks: async (parent, args, context) => {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getEntityLinksByAnnotationId(parent.id);

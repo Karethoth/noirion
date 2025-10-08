@@ -28,7 +28,7 @@ const imageResolvers = {
   Mutation: {
     uploadImage: async (parent, args, context) => {
       requirePermission(context.user, 'write');
-      
+
       const { file } = args;
       const { createReadStream, filename, mimetype } = await file;
 
@@ -53,7 +53,7 @@ const imageResolvers = {
 
     uploadImages: async (parent, args, context) => {
       requirePermission(context.user, 'write');
-      
+
       const { files } = args;
       const assetsService = new AssetsService(context.dbPool);
       const results = [];
@@ -86,7 +86,7 @@ const imageResolvers = {
 
     deleteImage: async (parent, args, context) => {
       requirePermission(context.user, 'write');
-      
+
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.deleteAsset(args.id);
     }

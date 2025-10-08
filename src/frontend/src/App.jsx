@@ -10,13 +10,13 @@ import './App.css'
 const client = new ApolloClient({
   cache: new InMemoryCache(),
   link: createUploadLink({
-    uri: 'http://localhost:4000/graphql',
+    uri: `${import.meta.env.VITE_API_URL}/graphql`,
   }),
 })
 
 function MainApp({ user, onLogout }) {
   const canWrite = user.role === 'admin' || user.role === 'investigator';
-  
+
   return (
     <div className="main-app">
       {/* Top Navigation Bar */}
