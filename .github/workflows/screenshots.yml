@@ -50,7 +50,8 @@ jobs:
       working-directory: ./src/backend
       run: |
         npm start &
-        npx wait-on http://localhost:4000/graphql -t 30000
+        sleep 5
+        curl -f http://localhost:4000/health || exit 1
       env:
         POSTGRES_USER: noirion
         POSTGRES_PASSWORD: secret
