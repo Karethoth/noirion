@@ -19,19 +19,19 @@ async function loginAsAdmin(page) {
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
-    
+
     // Check if already logged in by looking for upload button
     const uploadButton = page.getByRole('button', { name: /upload|add/i });
     if (await uploadButton.isVisible({ timeout: 1000 }).catch(() => false)) {
       console.log('Already logged in, skipping login');
       return true;
     }
-    
+
     // Find and fill login form
     const usernameInput = page.locator('input#username');
     const passwordInput = page.locator('input#password');
     const loginButton = page.locator('button[type="submit"]');
-    
+
     if (await usernameInput.isVisible({ timeout: 2000 }).catch(() => false)) {
       await usernameInput.fill('admin');
       await passwordInput.fill('password');
@@ -41,7 +41,7 @@ async function loginAsAdmin(page) {
       console.log('Logged in as admin');
       return true;
     }
-    
+
     return false;
   } catch (error) {
     console.log('Login error:', error.message);
@@ -58,34 +58,34 @@ async function uploadSampleImages(page) {
       console.log('Could not log in, skipping upload');
       return;
     }
-    
+
     // Get sample image files
     const sampleFiles = fs.readdirSync(SAMPLE_DATA_DIR)
       .filter(f => f.match(/\.(jpg|jpeg|png)$/i))
       .slice(0, 5) // Upload first 5 images
       .map(f => path.join(SAMPLE_DATA_DIR, f));
-    
+
     if (sampleFiles.length === 0) {
       console.log('No sample images found in', SAMPLE_DATA_DIR);
       return;
     }
-    
+
     console.log(`Uploading ${sampleFiles.length} sample images...`);
-    
+
     // Find the file input in the dropzone
     // The ImageUpload component uses react-dropzone
     const fileInput = page.locator('input[type="file"]').first();
-    
+
     if (await fileInput.isVisible({ timeout: 2000 }).catch(() => false)) {
       // Set the files to the input
       await fileInput.setInputFiles(sampleFiles);
-      
+
       // Wait for upload to complete
       await page.waitForTimeout(3000);
-      
+
       // Wait for success or check for upload button to be enabled again
       await page.waitForTimeout(2000);
-      
+
       console.log(`Successfully uploaded ${sampleFiles.length} sample images`);
     } else {
       console.log('File input not found');
@@ -135,10 +135,10 @@ test.describe('Application Screenshots', () => {
   test('03-image-gallery', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
-    
+
     // Wait a bit for images to load from the upload
     await page.waitForTimeout(2000);
-    
+
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, '03-image-gallery.png'),
       fullPage: true
@@ -153,7 +153,7 @@ test.describe('Application Screenshots', () => {
     // Click first image in gallery if available
     const images = page.locator('img[src*="/uploads/"]');
     const imageCount = await images.count();
-    
+
     if (imageCount > 0) {
       await images.first().click();
       await page.waitForLoadState('networkidle');
@@ -191,7 +191,7 @@ test.describe('Application Screenshots', () => {
     // Click first image to open detail view
     const images = page.locator('img[src*="/uploads/"]');
     const imageCount = await images.count();
-    
+
     if (imageCount > 0) {
       await images.first().click();
       await page.waitForLoadState('networkidle');
@@ -203,7 +203,7 @@ test.describe('Application Screenshots', () => {
         await annotateButton.click();
         await page.waitForTimeout(500);
       }
-      
+
       await page.screenshot({
         path: path.join(SCREENSHOT_DIR, '06-annotation-interface.png'),
         fullPage: true

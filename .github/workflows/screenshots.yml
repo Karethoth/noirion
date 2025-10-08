@@ -25,10 +25,10 @@ jobs:
           - 5432:5432
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '20'
 
@@ -67,7 +67,10 @@ jobs:
       working-directory: ./src/frontend
       run: npm run build
 
-    - name: Install Playwright
+    - name: Install root dependencies
+      run: npm install
+
+    - name: Install Playwright browsers
       run: npx playwright install --with-deps chromium
 
     - name: Start frontend server
@@ -82,7 +85,7 @@ jobs:
         SCREENSHOT_DIR: screenshots
 
     - name: Upload screenshots
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: screenshots
