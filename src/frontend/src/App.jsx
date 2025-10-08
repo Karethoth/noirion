@@ -1,47 +1,80 @@
-import { ApolloClient, HttpLink, InMemoryCache, gql } from '@apollo/client'
-import { ApolloProvider, useQuery } from '@apollo/client/react'
+import { useState, useEffect } from 'react'
+import { ApolloClient, InMemoryCache } from '@apollo/client'
+import { ApolloProvider } from '@apollo/client/react'
+import { createUploadLink } from './utils/uploadLink'
 import ImageMap from './components/ImageMap'
 import ImageUpload from './components/ImageUpload'
+import Login from './components/Login'
 import './App.css'
 
 const client = new ApolloClient({
   cache: new InMemoryCache(),
-  link: new HttpLink({
-    uri: 'http://localhost:4000/graphql',
-    fetch: fetch,
+  link: createUploadLink({
+    uri: `${import.meta.env.VITE_API_URL}/graphql`,
   }),
 })
 
-const HELLO_QUERY = gql`
-  query {
-    hello
-  }
-`
+function MainApp({ user, onLogout }) {
+  const canWrite = user.role === 'admin' || user.role === 'investigator';
 
-function Hello() {
-  const { loading, error, data } = useQuery(HELLO_QUERY)
+  return (
+    <div className="main-app">
+      {/* Top Navigation Bar */}
+      <nav className="top-nav">
+        <div className="nav-actions">
+          {canWrite && <ImageUpload />}
+          {!canWrite && (
+            <div className="read-only-badge" title="Your role has read-only access">
+              Read-Only
+            </div>
+          )}
+        </div>
+        <div className="nav-user-section">
+          <div className="user-info">
+            <span className="user-name">{user.full_name || user.username}</span>
+            <span className="user-role">{user.role}</span>
+          </div>
+          <button onClick={onLogout} className="logout-btn">
+            Logout
+          </button>
+        </div>
+      </nav>
 
-  if (loading) return <p>Loading...</p>
-  if (error) return <p>Error: {error.message}</p>
-
-  return <p>{data.hello}</p>
+      {/* Full-screen Map */}
+      <div className="map-container">
+        <ImageMap key="image-map" userRole={user.role} />
+      </div>
+    </div>
+  )
 }
 
 function App() {
+  const [user, setUser] = useState(null)
+
+  useEffect(() => {
+    // Check if user is already logged in
+    const storedUser = localStorage.getItem('user')
+    if (storedUser) {
+      setUser(JSON.parse(storedUser))
+    }
+  }, [])
+
+  const handleLoginSuccess = (userData) => {
+    setUser(userData)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('user')
+    setUser(null)
+  }
+
   return (
     <ApolloProvider client={client}>
-      <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-        <h1>🔍 Noirion - Image Investigation Platform</h1>
-        <p>Upload images with GPS data and visualize them on an OpenStreetMap</p>
-        
-        <Hello />
-        
-        <h2>📤 Upload Images</h2>
-        <ImageUpload />
-        
-        <h2>🗺️ Image Map</h2>
-        <ImageMap />
-      </div>
+      {user ? (
+        <MainApp user={user} onLogout={handleLogout} />
+      ) : (
+        <Login onLoginSuccess={handleLoginSuccess} />
+      )}
     </ApolloProvider>
   )
 }

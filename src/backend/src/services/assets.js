@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import { exifr } from 'exifr';
+import exifr from 'exifr';
 
 export class AssetsService {
   constructor(dbPool) {
@@ -34,7 +34,7 @@ export class AssetsService {
         iptc: true,
         icc: true
       });
-      
+
       if (!exifData) return {};
 
       // Normalize and extract key metadata
@@ -43,7 +43,7 @@ export class AssetsService {
         make: exifData.Make,
         model: exifData.Model,
         lens: exifData.LensModel || exifData.Lens,
-        
+
         // Exposure settings
         iso: exifData.ISO || exifData.ISOSpeedRatings,
         aperture: exifData.FNumber || exifData.ApertureValue,
@@ -51,38 +51,38 @@ export class AssetsService {
         exposureProgram: exifData.ExposureProgram,
         exposureBias: exifData.ExposureCompensation || exifData.ExposureBiasValue,
         meteringMode: exifData.MeteringMode,
-        
+
         // Lens and focus
         focalLength: exifData.FocalLength,
         focalLength35mm: exifData.FocalLengthIn35mmFormat,
-        
+
         // Flash
         flash: exifData.Flash,
         flashMode: exifData.FlashMode,
-        
+
         // Image properties
         orientation: exifData.Orientation,
         colorSpace: exifData.ColorSpace,
         whiteBalance: exifData.WhiteBalance,
-        
+
         // Timestamps
         dateTimeOriginal: exifData.DateTimeOriginal,
         dateTime: exifData.DateTime,
         dateTimeDigitized: exifData.DateTimeDigitized,
-        
+
         // GPS data
         latitude: exifData.latitude,
         longitude: exifData.longitude,
         altitude: exifData.altitude || exifData.GPSAltitude,
         gpsTimestamp: exifData.GPSDateStamp,
-        
+
         // Software/processing
         software: exifData.Software,
-        
+
         // Copyright and ownership
         copyright: exifData.Copyright,
         artist: exifData.Artist,
-        
+
         // Full raw data for reference
         raw: exifData
       };
@@ -94,7 +94,7 @@ export class AssetsService {
 
   async processAsset(fileBuffer, originalName, mimeType, uploaderId = null) {
     const hash = await this.calculateHash(fileBuffer);
-    
+
     // Check if asset already exists
     const existingAsset = await this.getAssetByHash(hash);
     if (existingAsset) {
@@ -105,7 +105,7 @@ export class AssetsService {
 
     // Extract EXIF data
     const exifData = await this.extractExifData(fileBuffer);
-    
+
     // Get image dimensions
     const metadata = await sharp(fileBuffer).metadata();
     const { width, height } = metadata;
@@ -163,65 +163,73 @@ export class AssetsService {
       // Insert EXIF data if available
       if (assetData.exifData && Object.keys(assetData.exifData).length > 0) {
         const exifData = assetData.exifData;
-        
+
         // Extract GPS coordinates
         const latitude = exifData.latitude;
         const longitude = exifData.longitude;
         const altitude = exifData.altitude;
 
-        const gpsClause = latitude && longitude 
-          ? `ST_SetSRID(ST_MakePoint($8, $7), 4326)` 
-          : 'NULL';
-
-        const baseParamCount = 17;
-        const gpsParamStart = baseParamCount + 1;
-        
-        const exifQuery = `
-          INSERT INTO asset_metadata_exif (
-            asset_id, capture_timestamp, camera_make, camera_model, 
-            orientation, width, height, altitude,
-            iso, aperture, shutter_speed, focal_length, focal_length_35mm,
-            flash, flash_mode, exposure_program, exposure_bias, 
-            metering_mode, white_balance, color_space,
-            lens, software, copyright, artist,
-            gps, exif_raw
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-            ${gpsClause}, $${latitude && longitude ? gpsParamStart + 2 : gpsParamStart}
-          )
-        `;
+        // Helper to ensure numeric values
+        const toNumber = (val) => {
+          if (val === null || val === undefined) return null;
+          const num = typeof val === 'number' ? val : parseFloat(val);
+          return isNaN(num) ? null : num;
+        };
 
         const exifValues = [
           asset.id,                                              // $1
           exifData.dateTimeOriginal || exifData.dateTime || null, // $2
           exifData.make || null,                                 // $3
           exifData.model || null,                                // $4
-          exifData.orientation || null,                          // $5
+          toNumber(exifData.orientation),                        // $5 - must be integer
           assetData.width,                                       // $6
           assetData.height,                                      // $7
-          altitude || null,                                      // $8
-          exifData.iso || null,                                  // $9
-          exifData.aperture || null,                             // $10
-          exifData.shutterSpeed || null,                         // $11
-          exifData.focalLength || null,                          // $12
-          exifData.focalLength35mm || null,                      // $13
-          exifData.flash || null,                                // $14
-          exifData.flashMode || null,                            // $15
-          exifData.exposureProgram || null,                      // $16
-          exifData.exposureBias || null,                         // $17
-          exifData.meteringMode || null,                         // $18
-          exifData.whiteBalance || null,                         // $19
-          exifData.colorSpace || null,                           // $20
-          exifData.lens || null,                                 // $21
-          exifData.software || null,                             // $22
-          exifData.copyright || null,                            // $23
-          exifData.artist || null,                               // $24
-          JSON.stringify(exifData)                               // Last param (varies)
+          toNumber(altitude),                                    // $8
+          toNumber(exifData.iso),                                // $9
+          toNumber(exifData.aperture),                           // $10
+          toNumber(exifData.shutterSpeed),                       // $11
+          toNumber(exifData.focalLength),                        // $12
+          toNumber(exifData.focalLength35mm),                    // $13
+          toNumber(exifData.flash),                              // $14
+          exifData.flashMode || null,                            // $15 - can be string
+          toNumber(exifData.exposureProgram),                    // $16
+          toNumber(exifData.exposureBias),                       // $17
+          toNumber(exifData.meteringMode),                       // $18
+          toNumber(exifData.whiteBalance),                       // $19
+          toNumber(exifData.colorSpace),                         // $20
+          exifData.lens || null,                                 // $21 - string
+          exifData.software || null,                             // $22 - string
+          exifData.copyright || null,                            // $23 - string
+          exifData.artist || null,                               // $24 - string
         ];
 
+        let gpsClause, exifRawParam;
         if (latitude && longitude) {
-          exifValues.splice(24, 0, latitude, longitude);
+          exifValues.push(longitude);                            // $25
+          exifValues.push(latitude);                             // $26
+          gpsClause = 'ST_SetSRID(ST_MakePoint($25, $26), 4326)';
+          exifRawParam = '$27';
+          exifValues.push(JSON.stringify(exifData));             // $27
+        } else {
+          gpsClause = 'NULL';
+          exifRawParam = '$25';
+          exifValues.push(JSON.stringify(exifData));             // $25
         }
+
+        const exifQuery = `
+          INSERT INTO asset_metadata_exif (
+            asset_id, capture_timestamp, camera_make, camera_model,
+            orientation, width, height, altitude,
+            iso, aperture, shutter_speed, focal_length, focal_length_35mm,
+            flash, flash_mode, exposure_program, exposure_bias,
+            metering_mode, white_balance, color_space,
+            lens, software, copyright, artist,
+            gps, exif_raw
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+            ${gpsClause}, ${exifRawParam}
+          )
+        `;
 
         await client.query(exifQuery, exifValues);
       }
@@ -240,8 +248,8 @@ export class AssetsService {
     const client = await this.dbPool.connect();
     try {
       const result = await client.query(`
-        SELECT a.*, 
-               e.capture_timestamp, e.camera_make, e.camera_model, 
+        SELECT a.*,
+               e.capture_timestamp, e.camera_make, e.camera_model,
                e.orientation, e.width, e.height, e.altitude,
                e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
                e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
@@ -263,8 +271,8 @@ export class AssetsService {
     const client = await this.dbPool.connect();
     try {
       const result = await client.query(`
-        SELECT a.*, 
-               e.capture_timestamp, e.camera_make, e.camera_model, 
+        SELECT a.*,
+               e.capture_timestamp, e.camera_make, e.camera_model,
                e.orientation, e.width, e.height, e.altitude,
                e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
                e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
@@ -288,8 +296,8 @@ export class AssetsService {
     const client = await this.dbPool.connect();
     try {
       const result = await client.query(`
-        SELECT a.*, 
-               e.capture_timestamp, e.camera_make, e.camera_model, 
+        SELECT a.*,
+               e.capture_timestamp, e.camera_make, e.camera_model,
                e.orientation, e.width, e.height, e.altitude,
                e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
                e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
@@ -312,8 +320,8 @@ export class AssetsService {
     const client = await this.dbPool.connect();
     try {
       const result = await client.query(`
-        SELECT a.*, 
-               e.capture_timestamp, e.camera_make, e.camera_model, 
+        SELECT a.*,
+               e.capture_timestamp, e.camera_make, e.camera_model,
                e.orientation, e.width, e.height, e.altitude,
                e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
                e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
@@ -332,8 +340,49 @@ export class AssetsService {
         )
         ORDER BY a.uploaded_at DESC
       `, [southWest.lng, southWest.lat, northEast.lng, northEast.lat]);
-      
+
       return result.rows.map(row => this.formatAssetResult(row));
+    } finally {
+      client.release();
+    }
+  }
+
+  async deleteAsset(id) {
+    const client = await this.dbPool.connect();
+    try {
+      // Hard delete - delete associated data first due to foreign key constraints
+
+      // Delete annotation regions first
+      await client.query(
+        `DELETE FROM annotation_regions WHERE annotation_id IN (
+          SELECT id FROM annotations WHERE asset_id = $1
+        )`,
+        [id]
+      );
+
+      // Delete annotations
+      await client.query(
+        `DELETE FROM annotations WHERE asset_id = $1`,
+        [id]
+      );
+
+      // Delete asset metadata
+      await client.query(
+        `DELETE FROM asset_metadata_exif WHERE asset_id = $1`,
+        [id]
+      );
+
+      // Finally delete the asset itself
+      const result = await client.query(
+        `DELETE FROM assets WHERE id = $1 RETURNING id`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Image not found');
+      }
+
+      return true;
     } finally {
       client.release();
     }
@@ -354,12 +403,12 @@ export class AssetsService {
       longitude: row.longitude,
       altitude: row.altitude ? parseFloat(row.altitude) : null,
       orientation: row.orientation,
-      
+
       // Camera information
       cameraMake: row.camera_make,
       cameraModel: row.camera_model,
       lens: row.lens,
-      
+
       // Exposure settings
       iso: row.iso,
       aperture: row.aperture ? parseFloat(row.aperture) : null,
@@ -367,29 +416,29 @@ export class AssetsService {
       exposureProgram: row.exposure_program,
       exposureBias: row.exposure_bias ? parseFloat(row.exposure_bias) : null,
       meteringMode: row.metering_mode,
-      
+
       // Lens and focus
       focalLength: row.focal_length ? parseFloat(row.focal_length) : null,
       focalLength35mm: row.focal_length_35mm,
-      
+
       // Flash
       flash: row.flash,
       flashMode: row.flash_mode,
-      
+
       // Image properties
       colorSpace: row.color_space,
       whiteBalance: row.white_balance,
-      
+
       // Timestamps
       captureTimestamp: row.capture_timestamp?.toISOString(),
       uploadedAt: row.uploaded_at?.toISOString(),
       uploadedBy: row.uploader_id,
-      
+
       // Metadata
       software: row.software,
       copyright: row.copyright,
       artist: row.artist,
-      
+
       // Full EXIF data for advanced use
       exifData: row.exif_raw || {},
       metadata: row.metadata || {}

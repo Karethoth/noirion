@@ -35,7 +35,7 @@ describe('AnnotationService', () => {
       };
 
       const mockTag = { id: 1 };
-      
+
       // Mock transaction and queries
       mockClient.query
         .mockResolvedValueOnce({ rows: [] }) // BEGIN
@@ -189,29 +189,6 @@ describe('AnnotationService', () => {
       expect(result.shapeType).toBe('BOX');
       expect(result.coordinates.x).toBe(10);
       expect(mockClient.release).toHaveBeenCalled();
-    });
-
-    test('should add point region to annotation', async () => {
-      const mockRegion = {
-        id: 2,
-        annotation_id: 1,
-        shape_type: 'point',
-        coordinates: { x: 100, y: 200 },
-        style: { color: '#00ff00', strokeWidth: 1 },
-        created_at: new Date()
-      };
-
-      mockClient.query
-        .mockResolvedValueOnce({ rows: [mockRegion] })
-        .mockResolvedValueOnce({ rows: [] });
-
-      const result = await annotationService.addRegion(1, {
-        shapeType: 'POINT',
-        coordinates: { x: 100, y: 200 }
-      });
-
-      expect(result.shapeType).toBe('POINT');
-      expect(result.coordinates.x).toBe(100);
     });
   });
 

@@ -1,10 +1,90 @@
-import React from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { gql } from '@apollo/client';
+import { useQuery, useMutation } from '@apollo/client/react';
+import { formatMGRS } from '../utils/coordinates';
+import AnnotationViewer from './AnnotationViewer';
+import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
 
-const ImageModal = ({ image, isOpen, onClose }) => {
+// GraphQL queries and mutations
+const GET_ANNOTATIONS = gql`
+  query GetAnnotations($assetId: ID!) {
+    annotations(assetId: $assetId) {
+      id
+      title
+      description
+      tags
+      regions {
+        id
+        shapeType
+        coordinates
+        style
+      }
+    }
+  }
+`;
+
+const ADD_ANNOTATION = gql`
+  mutation CreateAnnotation($input: CreateAnnotationInput!) {
+    createAnnotation(input: $input) {
+      id
+      regions { id shapeType coordinates style }
+    }
+  }
+`;
+
+const DELETE_ANNOTATION = gql`
+  mutation DeleteAnnotation($id: ID!) {
+    deleteAnnotation(id: $id)
+  }
+`;
+
+const ADD_REGION = gql`
+  mutation AddAnnotationRegion($annotationId: ID!, $input: AddRegionInput!) {
+    addAnnotationRegion(annotationId: $annotationId, input: $input) {
+      id
+      shapeType
+      coordinates
+      style
+    }
+  }
+`;
+
+
+const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
+  const { data, refetch } = useQuery(GET_ANNOTATIONS, {
+    variables: { assetId: image?.id },
+    skip: !image,
+    fetchPolicy: 'network-only',
+  });
+  const [addAnnotation] = useMutation(ADD_ANNOTATION);
+  const [addRegion] = useMutation(ADD_REGION);
+  const [deleteAnnotation] = useMutation(DELETE_ANNOTATION);
+  const [updateAnnotation] = useMutation(UPDATE_ANNOTATION);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+
+  // When annotations change, select the first by default if none selected
+  useEffect(() => {
+    if (data?.annotations?.length > 0 && !selectedAnnotationId) {
+      setSelectedAnnotationId(data.annotations[0].id);
+    }
+    if (data?.annotations?.length === 0) {
+      setSelectedAnnotationId(null);
+    }
+  }, [data, selectedAnnotationId]);
+
+  // Delete annotation handler
+  const handleAnnotationDelete = useCallback(async (annotationId) => {
+    if (!annotationId) return;
+    if (!window.confirm('Delete this annotation and all its regions?')) return;
+    await deleteAnnotation({ variables: { id: annotationId } });
+    if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null);
+    refetch();
+  }, [deleteAnnotation, refetch, selectedAnnotationId]);
+
   if (!isOpen || !image) return null;
 
   return (
-    <div 
+    <div
       style={{
         position: 'fixed',
         top: 0,
@@ -20,15 +100,19 @@ const ImageModal = ({ image, isOpen, onClose }) => {
       }}
       onClick={onClose}
     >
-      <div 
+      <div
         style={{
           position: 'relative',
-          maxWidth: '90%',
-          maxHeight: '90%',
-          backgroundColor: 'white',
+          width: '90vw',
+          height: '90vh',
+          maxWidth: '1400px',
+          backgroundColor: '#1a1a1a',
           borderRadius: '8px',
           overflow: 'hidden',
-          cursor: 'default'
+          cursor: 'default',
+          display: 'flex',
+          flexDirection: 'column',
+          border: '1px solid #3a3a3a'
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -53,24 +137,65 @@ const ImageModal = ({ image, isOpen, onClose }) => {
           ×
         </button>
 
-        {/* Image */}
-        <img
-          src={`http://localhost:4000${image.filePath}`}
-          alt={image.filename}
-          style={{
-            width: '100%',
-            height: 'auto',
-            display: 'block'
-          }}
-          onError={(e) => {
-            e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZGRkIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkltYWdlIG5vdCBhdmFpbGFibGU8L3RleHQ+PC9zdmc+';
-          }}
-        />
+
+        {/* Annotation Viewer */}
+        <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+          <AnnotationViewer
+            image={{ ...image, filePath: `${import.meta.env.VITE_API_URL}${image.filePath}` }}
+            annotations={data?.annotations || []}
+            readOnly={readOnly}
+            onAnnotationCreate={async (input, opts) => {
+              // If opts.edit, update existing annotation, else create new
+              if (opts && opts.edit && input.id) {
+                await updateAnnotation({
+                  variables: {
+                    id: input.id,
+                    input: {
+                      title: input.title || '',
+                      description: input.description,
+                      tags: input.tags || [],
+                    },
+                  },
+                });
+                refetch();
+                return;
+              }
+              // Create a new annotation with region and description
+              const res = await addAnnotation({
+                variables: {
+                  input: {
+                    assetId: image.id,
+                    title: '',
+                    description: input.description,
+                    tags: input.tags || [],
+                  },
+                },
+              });
+              const annotationId = res.data.createAnnotation.id;
+              await addRegion({
+                variables: {
+                  annotationId,
+                  input: { shapeType: input.shapeType, coordinates: input.coordinates, style: input.style },
+                },
+              });
+              refetch();
+            }}
+            onAnnotationDelete={handleAnnotationDelete}
+          />
+        </div>
 
         {/* Image metadata */}
-        <div style={{ padding: '15px', fontSize: '14px', color: '#333' }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>{image.filename}</h3>
-          
+        <div style={{
+          padding: '15px',
+          fontSize: '14px',
+          color: '#e0e0e0',
+          backgroundColor: '#2a2a2a',
+          borderTop: '1px solid #3a3a3a',
+          flexShrink: 0,
+          maxHeight: '180px',
+          overflowY: 'auto'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', color: '#e0e0e0' }}>{image.filename}</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               {image.captureTimestamp && (
@@ -81,13 +206,11 @@ const ImageModal = ({ image, isOpen, onClose }) => {
                 <div><strong>Camera:</strong> {image.cameraMake} {image.cameraModel}</div>
               )}
             </div>
-            
             <div>
               {image.latitude && image.longitude && (
-                <>
-                  <div><strong>Latitude:</strong> {image.latitude.toFixed(6)}</div>
-                  <div><strong>Longitude:</strong> {image.longitude.toFixed(6)}</div>
-                </>
+                <div style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                  <strong>MGRS:</strong> {formatMGRS(image.longitude, image.latitude)}
+                </div>
               )}
               <div><strong>File Size:</strong> {image.fileSize ? (image.fileSize / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown'}</div>
             </div>

@@ -1,0 +1,260 @@
+/* Map container background colors for different styles */
+.leaflet-container {
+  background: #f0f0f0; /* Default light gray for day mode */
+}
+
+.leaflet-container.map-style-night {
+  background: #1a1a1a; /* Dark background for night mode */
+}
+
+.leaflet-container.map-style-satellite {
+  background: #2a2a2a; /* Darker gray for satellite mode */
+}
+
+/* Custom styling for Leaflet popups - Day mode */
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0;
+  background: white;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.leaflet-popup-tip {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background: white;
+}
+
+/* Dark mode popups for night and satellite themes */
+.map-style-night .leaflet-popup-content-wrapper,
+.map-style-satellite .leaflet-popup-content-wrapper {
+  background: #2a2a2e;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.map-style-night .leaflet-popup-tip,
+.map-style-satellite .leaflet-popup-tip {
+  background: #2a2a2e;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Dark mode popup text colors */
+.map-style-night .leaflet-popup-content,
+.map-style-satellite .leaflet-popup-content {
+  color: #e0e0e0;
+}
+
+/* Additional dark mode styling for popup content */
+.map-style-night .leaflet-popup-content div,
+.map-style-satellite .leaflet-popup-content div {
+  color: inherit;
+}
+
+/* Override inline styles for dark backgrounds */
+.map-style-night .leaflet-popup-content div[style*="#f8f8f8"],
+.map-style-satellite .leaflet-popup-content div[style*="#f8f8f8"] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #b0b0b0 !important;
+}
+
+/* Dark mode text colors */
+.map-style-night .leaflet-popup-content div[style*="#333"],
+.map-style-satellite .leaflet-popup-content div[style*="#333"] {
+  color: #e0e0e0 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#666"],
+.map-style-satellite .leaflet-popup-content div[style*="#666"] {
+  color: #a0a0a0 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#888"],
+.map-style-satellite .leaflet-popup-content div[style*="#888"] {
+  color: #888 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#999"],
+.map-style-satellite .leaflet-popup-content div[style*="#999"] {
+  color: #999 !important;
+}
+
+/* Map controls styling */
+.map-style-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  background: rgba(248, 249, 250, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  display: flex;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(4px);
+}
+
+.map-style-button {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: #6c757d;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.map-style-button:last-child {
+  border-right: none;
+}
+
+.map-style-button:hover {
+  background: rgba(108, 117, 125, 0.1);
+  color: #495057;
+}
+
+.map-style-button.active {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: white;
+  font-weight: 600;
+}
+
+.map-style-button.active:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%);
+}
+
+/* Map info overlay */
+.map-info-overlay {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 16px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  color: #333;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.map-info-overlay strong {
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+/* Popup metadata styling */
+.popup-metadata {
+  margin-bottom: 10px;
+}
+
+.popup-timestamp,
+.popup-filename,
+.popup-coordinates {
+  font-size: 12px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Light mode colors */
+.popup-timestamp {
+  color: #1a1a2e;
+  font-weight: 600;
+}
+
+.popup-filename {
+  color: #495057;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.popup-coordinates {
+  color: #6c757d;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
+/* Dark mode colors */
+.map-style-night .popup-timestamp,
+.map-style-satellite .popup-timestamp {
+  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-style-night .popup-filename,
+.map-style-satellite .popup-filename {
+  color: #b0b0b0;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.map-style-night .popup-coordinates,
+.map-style-satellite .popup-coordinates {
+  color: #90a0b0;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Tags styling */
+.popup-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.popup-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* Dark mode tags */
+.map-style-night .popup-tag,
+.map-style-satellite .popup-tag {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Custom numbered marker cluster */
+.custom-marker-cluster {
+  background: transparent;
+  border: none;
+  z-index: 1 !important; /* Render below regular markers */
+}
+
+.marker-cluster-inner {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  border: 3px solid white;
+  border-radius: 8px;
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 3px 12px rgba(37, 99, 235, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+  position: relative;
+  pointer-events: none; /* Make non-interactive */
+}
+
+.marker-cluster-inner::before {
+  content: '📸';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  font-size: 10px;
+  opacity: 0.7;
+}

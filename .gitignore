@@ -1,6 +1,7 @@
 .continue/
 doc/
 tools/
+TODO.md
 
 logs
 *.log

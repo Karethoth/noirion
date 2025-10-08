@@ -7,10 +7,16 @@ describe('Annotation GraphQL Resolvers', () => {
   let mockAssetsService;
 
   beforeEach(() => {
-    // Mock context
+    // Mock context with authenticated user
     mockContext = {
       dbPool: {},
-      userId: 1
+      userId: 1,
+      user: {
+        userId: 1,
+        username: 'testuser',
+        email: 'test@example.com',
+        role: 'investigator' // Has 'read' and 'write' permissions
+      }
     };
 
     // We'll spy on the actual service creation
