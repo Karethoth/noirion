@@ -55,7 +55,7 @@ const Login = ({ onLoginSuccess }) => {
   return (
     <div className="login-container">
       <div className="login-box">
-        <h2>🔍 Noirion Login</h2>
+        <h2>Noirion Login</h2>
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="username">Username</label>
@@ -96,9 +96,6 @@ const Login = ({ onLoginSuccess }) => {
             <li><code>investigator</code> / password (can edit)</li>
             <li><code>analyst</code> / password (read-only)</li>
           </ul>
-          <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-            Note: Backend currently has no authentication enforcement. Login is for role-based UI only.
-          </p>
         </div>
       </div>
     </div>

@@ -11,11 +11,12 @@
   background: #2a2a2a; /* Darker gray for satellite mode */
 }
 
-/* Custom styling for Leaflet popups */
+/* Custom styling for Leaflet popups - Day mode */
 .leaflet-popup-content-wrapper {
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   padding: 0;
+  background: white;
 }
 
 .leaflet-popup-content {
@@ -25,6 +26,61 @@
 
 .leaflet-popup-tip {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background: white;
+}
+
+/* Dark mode popups for night and satellite themes */
+.map-style-night .leaflet-popup-content-wrapper,
+.map-style-satellite .leaflet-popup-content-wrapper {
+  background: #2a2a2e;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.map-style-night .leaflet-popup-tip,
+.map-style-satellite .leaflet-popup-tip {
+  background: #2a2a2e;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Dark mode popup text colors */
+.map-style-night .leaflet-popup-content,
+.map-style-satellite .leaflet-popup-content {
+  color: #e0e0e0;
+}
+
+/* Additional dark mode styling for popup content */
+.map-style-night .leaflet-popup-content div,
+.map-style-satellite .leaflet-popup-content div {
+  color: inherit;
+}
+
+/* Override inline styles for dark backgrounds */
+.map-style-night .leaflet-popup-content div[style*="#f8f8f8"],
+.map-style-satellite .leaflet-popup-content div[style*="#f8f8f8"] {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #b0b0b0 !important;
+}
+
+/* Dark mode text colors */
+.map-style-night .leaflet-popup-content div[style*="#333"],
+.map-style-satellite .leaflet-popup-content div[style*="#333"] {
+  color: #e0e0e0 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#666"],
+.map-style-satellite .leaflet-popup-content div[style*="#666"] {
+  color: #a0a0a0 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#888"],
+.map-style-satellite .leaflet-popup-content div[style*="#888"] {
+  color: #888 !important;
+}
+
+.map-style-night .leaflet-popup-content div[style*="#999"],
+.map-style-satellite .leaflet-popup-content div[style*="#999"] {
+  color: #999 !important;
 }
 
 /* Map controls styling */

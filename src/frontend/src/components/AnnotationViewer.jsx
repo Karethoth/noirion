@@ -632,7 +632,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             )}
             {!readOnly && (
               <div className="annotation-details-actions">
-                <button 
+                <button
                   onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}
                   style={{
                     backgroundColor: '#dc3545',

@@ -19,12 +19,13 @@
 .login-box h2 {
   margin: 0 0 10px 0;
   text-align: center;
-  color: #e0e0e0;
+  color: #f0f0f0;
+  font-size: 24px;
 }
 
 .login-subtitle {
   text-align: center;
-  color: #999;
+  color: #b0b0b0;
   margin-bottom: 30px;
   font-size: 14px;
 }
@@ -36,8 +37,9 @@
 .form-group label {
   display: block;
   margin-bottom: 5px;
-  color: #e0e0e0;
+  color: #f0f0f0;
   font-weight: 500;
+  font-size: 14px;
 }
 
 .form-group input {
@@ -108,7 +110,7 @@
 .demo-accounts p {
   margin: 0 0 10px 0;
   font-size: 14px;
-  color: #999;
+  color: #b0b0b0;
 }
 
 .demo-accounts ul {
@@ -120,7 +122,8 @@
 .demo-accounts li {
   margin: 5px 0;
   font-size: 13px;
-  color: #999;
+  color: #c0c0c0;
+  line-height: 1.6;
 }
 
 .demo-accounts code {
