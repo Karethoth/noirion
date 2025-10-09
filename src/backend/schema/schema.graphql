@@ -11,6 +11,11 @@
     imagesInArea(bounds: BoundsInput!): [Image!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
+    
+    # Entity queries
+    entities(entityType: String, limit: Int, offset: Int): [Entity!]!
+    entity(id: ID!): Entity
+    searchEntities(query: String!, entityType: String, limit: Int): [Entity!]!
   }
 
   type Mutation {
@@ -29,6 +34,14 @@
     addAnnotationRegion(annotationId: ID!, input: AddRegionInput!): AnnotationRegion!
     updateAnnotationRegion(id: ID!, input: UpdateRegionInput!): AnnotationRegion!
     deleteAnnotationRegion(id: ID!): Boolean!
+    
+    # Entity mutations
+    createEntity(input: CreateEntityInput!): Entity!
+    updateEntity(id: ID!, input: UpdateEntityInput!): Entity!
+    deleteEntity(id: ID!): Boolean!
+    addEntityAttribute(entityId: ID!, input: AddEntityAttributeInput!): EntityAttribute!
+    updateEntityAttribute(id: ID!, input: UpdateEntityAttributeInput!): EntityAttribute!
+    deleteEntityAttribute(id: ID!): Boolean!
   }
 
   type AuthPayload {
@@ -180,6 +193,53 @@
   input UpdateRegionInput {
     coordinates: JSON
     style: JSON
+  }
+
+  # Entity types
+  type Entity {
+    id: ID!
+    entityType: String!
+    displayName: String
+    attributes: [EntityAttribute!]!
+    tags: [String!]
+    metadata: JSON
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type EntityAttribute {
+    id: ID!
+    entityId: ID!
+    attributeName: String!
+    attributeValue: JSON!
+    confidence: Float
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  input CreateEntityInput {
+    entityType: String!
+    displayName: String
+    tags: [String!]
+    metadata: JSON
+  }
+
+  input UpdateEntityInput {
+    displayName: String
+    tags: [String!]
+    metadata: JSON
+  }
+
+  input AddEntityAttributeInput {
+    attributeName: String!
+    attributeValue: JSON!
+    confidence: Float
+  }
+
+  input UpdateEntityAttributeInput {
+    attributeName: String
+    attributeValue: JSON
+    confidence: Float
   }
 
   scalar JSON
