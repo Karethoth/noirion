@@ -4,6 +4,7 @@ import { ApolloProvider } from '@apollo/client/react'
 import { createUploadLink } from './utils/uploadLink'
 import ImageMap from './components/ImageMap'
 import ImageUpload from './components/ImageUpload'
+import EntityManager from './components/EntityManager'
 import Login from './components/Login'
 import './App.css'
 
@@ -15,14 +16,29 @@ const client = new ApolloClient({
 })
 
 function MainApp({ user, onLogout }) {
+  const [currentView, setCurrentView] = useState('map');
   const canWrite = user.role === 'admin' || user.role === 'investigator';
 
   return (
     <div className="main-app">
       {/* Top Navigation Bar */}
       <nav className="top-nav">
+        <div className="nav-tabs">
+          <button
+            className={`nav-tab ${currentView === 'map' ? 'active' : ''}`}
+            onClick={() => setCurrentView('map')}
+          >
+            🗺️ Map
+          </button>
+          <button
+            className={`nav-tab ${currentView === 'entities' ? 'active' : ''}`}
+            onClick={() => setCurrentView('entities')}
+          >
+            👤 Entities
+          </button>
+        </div>
         <div className="nav-actions">
-          {canWrite && <ImageUpload />}
+          {canWrite && currentView === 'map' && <ImageUpload />}
           {!canWrite && (
             <div className="read-only-badge" title="Your role has read-only access">
               Read-Only
@@ -40,9 +56,16 @@ function MainApp({ user, onLogout }) {
         </div>
       </nav>
 
-      {/* Full-screen Map */}
-      <div className="map-container">
-        <ImageMap key="image-map" userRole={user.role} />
+      {/* Content Area */}
+      <div className="content-container">
+        {currentView === 'map' && (
+          <div className="map-container">
+            <ImageMap key="image-map" userRole={user.role} />
+          </div>
+        )}
+        {currentView === 'entities' && (
+          <EntityManager userRole={user.role} />
+        )}
       </div>
     </div>
   )
