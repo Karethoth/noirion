@@ -8,11 +8,19 @@ import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
 
-// Module-level flag to ensure bounds fitting happens only once per page load
-let hasEverFitBounds = false;
-
 // Save/restore map position across component remounts
+// Store both in module scope and localStorage for persistence
 let savedMapView = null;
+
+// Load from localStorage on module load
+try {
+  const stored = localStorage.getItem('mapView');
+  if (stored) {
+    savedMapView = JSON.parse(stored);
+  }
+} catch (e) {
+  console.error('Failed to load saved map view:', e);
+}
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -48,17 +56,23 @@ const DELETE_IMAGE = gql`
   }
 `;
 
-// Component to fit bounds to all markers on initial load only
-function FitBounds({ images, hasInitialized }) {
+// Component to restore saved view or fit bounds to markers
+function MapInitializer({ images, hasInitialized }) {
   const map = useMap();
 
   useEffect(() => {
-    // Triple protection: module-level flag, component ref, and check for images
-    if (!hasEverFitBounds && !hasInitialized.current && images.length > 0) {
+    if (hasInitialized.current) return;
+
+    // If we have a saved view, restore it
+    if (savedMapView?.center) {
+      map.setView(savedMapView.center, savedMapView.zoom, { animate: false });
+      hasInitialized.current = true;
+    }
+    // Otherwise, fit bounds to markers if we have images
+    else if (images.length > 0) {
       const bounds = L.latLngBounds(images.map(img => [img.latitude, img.longitude]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
       hasInitialized.current = true;
-      hasEverFitBounds = true; // Set module-level flag
     }
     // Only run on mount by excluding images from dependencies
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,13 +86,19 @@ function ViewPersistence() {
   const map = useMap();
 
   useEffect(() => {
-    // Save view on any change (after initial bounds fit)
+    // Save view on any change
     const saveView = () => {
-      if (hasEverFitBounds) {
-        savedMapView = {
-          center: map.getCenter(),
-          zoom: map.getZoom()
-        };
+      const view = {
+        center: map.getCenter(),
+        zoom: map.getZoom()
+      };
+      savedMapView = view;
+
+      // Also persist to localStorage
+      try {
+        localStorage.setItem('mapView', JSON.stringify(view));
+      } catch (e) {
+        console.error('Failed to save map view:', e);
       }
     };
 
@@ -317,7 +337,7 @@ const ImageMap = ({ userRole }) => {
         />
         <MapStyleController style={mapStyle} />
         {!hasInitializedBounds.current && (
-          <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
+          <MapInitializer images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
         )}
         <ViewPersistence />
 

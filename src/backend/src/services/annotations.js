@@ -146,10 +146,10 @@ export class AnnotationService {
         JSON.stringify(coordinates),
         JSON.stringify(style || { color: '#ff0000', strokeWidth: 2 })
       ]);
-      
+
       // Update annotation timestamp
       await client.query('UPDATE annotations SET updated_at = NOW() WHERE id = $1', [annotationId]);
-      
+
       return this.formatRegion(result.rows[0]);
     } finally {
       client.release();
@@ -184,17 +184,17 @@ export class AnnotationService {
         RETURNING *
       `;
       const result = await client.query(query, values);
-      
+
       if (result.rows.length === 0) {
         throw new Error('Region not found');
       }
-      
+
       // Update annotation timestamp
       await client.query(
         'UPDATE annotations SET updated_at = NOW() WHERE id = (SELECT annotation_id FROM annotation_regions WHERE id = $1)',
         [regionId]
       );
-      
+
       return this.formatRegion(result.rows[0]);
     } finally {
       client.release();
@@ -209,19 +209,19 @@ export class AnnotationService {
         'SELECT annotation_id FROM annotation_regions WHERE id = $1',
         [regionId]
       );
-      
+
       if (annotationResult.rows.length === 0) {
         throw new Error('Region not found');
       }
-      
+
       const annotationId = annotationResult.rows[0].annotation_id;
-      
+
       // Delete region
       await client.query('DELETE FROM annotation_regions WHERE id = $1', [regionId]);
-      
+
       // Update annotation timestamp
       await client.query('UPDATE annotations SET updated_at = NOW() WHERE id = $1', [annotationId]);
-      
+
       return true;
     } finally {
       client.release();
@@ -241,11 +241,11 @@ export class AnnotationService {
         GROUP BY a.id
       `;
       const result = await client.query(query, [annotationId]);
-      
+
       if (result.rows.length === 0) {
         return null;
       }
-      
+
       return this.formatAnnotation(result.rows[0]);
     } finally {
       client.release();
@@ -297,6 +297,51 @@ export class AnnotationService {
       `;
       const result = await client.query(query, [annotationId]);
       return result.rows.map(row => this.formatEntityLink(row));
+    } finally {
+      client.release();
+    }
+  }
+
+  async linkEntityToAnnotation(annotationId, entityId, { relationType, confidence, notes }) {
+    const client = await this.dbPool.connect();
+    try {
+      const query = `
+        INSERT INTO annotation_entity_links (annotation_id, entity_id, relation_type, confidence, notes)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+      const result = await client.query(query, [
+        annotationId,
+        entityId,
+        relationType || null,
+        confidence || 1.0,
+        notes || null
+      ]);
+      return this.formatEntityLink(result.rows[0]);
+    } catch (error) {
+      logger.error('Error linking entity to annotation:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async unlinkEntityFromAnnotation(linkId) {
+    const client = await this.dbPool.connect();
+    try {
+      const query = `
+        DELETE FROM annotation_entity_links
+        WHERE id = $1
+        RETURNING *
+      `;
+      const result = await client.query(query, [linkId]);
+      if (result.rows.length === 0) {
+        throw new Error('Entity link not found');
+      }
+      return this.formatEntityLink(result.rows[0]);
+    } catch (error) {
+      logger.error('Error unlinking entity from annotation:', error);
+      throw error;
     } finally {
       client.release();
     }

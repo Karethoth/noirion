@@ -42,6 +42,10 @@ export const typeDefs = `#graphql
     addEntityAttribute(entityId: ID!, input: AddEntityAttributeInput!): EntityAttribute!
     updateEntityAttribute(id: ID!, input: UpdateEntityAttributeInput!): EntityAttribute!
     deleteEntityAttribute(id: ID!): Boolean!
+
+    # Entity-Annotation linking mutations
+    linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
   }
 
   type AuthPayload {
@@ -163,6 +167,7 @@ export const typeDefs = `#graphql
     id: ID!
     annotationId: ID!
     entityId: ID!
+    entity: Entity
     relationType: String
     confidence: Float
     notes: String
