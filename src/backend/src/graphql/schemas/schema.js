@@ -19,6 +19,9 @@ export const typeDefs = `#graphql
 
     # Presence queries
     presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
+
+    # Entity relationship queries
+    entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!
   }
 
   type Mutation {
@@ -52,6 +55,10 @@ export const typeDefs = `#graphql
 
     # Presence mutations
     createPresence(input: CreatePresenceInput!): Presence!
+
+    # Entity relationship mutations
+    createEntityLink(input: CreateEntityLinkInput!): EntityLink!
+    deleteEntityLink(id: ID!): Boolean!
   }
 
   type AuthPayload {
@@ -226,6 +233,29 @@ export const typeDefs = `#graphql
     confidence: Float
     createdAt: String!
     updatedAt: String!
+  }
+
+  type EntityLink {
+    id: ID!
+    fromEntityId: ID!
+    toEntityId: ID!
+    fromEntity: Entity
+    toEntity: Entity
+    relationType: String!
+    confidence: Float
+    notes: String
+    createdAt: String
+    createdBy: ID
+    metadata: JSON
+  }
+
+  input CreateEntityLinkInput {
+    fromEntityId: ID!
+    toEntityId: ID!
+    relationType: String!
+    confidence: Float
+    notes: String
+    metadata: JSON
   }
 
   type Presence {

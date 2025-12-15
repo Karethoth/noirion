@@ -107,6 +107,47 @@ const GET_PRESENCES_BY_ENTITY = gql`
   }
 `;
 
+const GET_ENTITY_LINKS = gql`
+  query GetEntityLinks($entityId: ID!, $limit: Int, $offset: Int) {
+    entityLinks(entityId: $entityId, limit: $limit, offset: $offset) {
+      id
+      fromEntityId
+      toEntityId
+      relationType
+      confidence
+      notes
+      fromEntity { id displayName entityType }
+      toEntity { id displayName entityType }
+      createdAt
+    }
+  }
+`;
+
+const CREATE_ENTITY_LINK = gql`
+  mutation CreateEntityLink($input: CreateEntityLinkInput!) {
+    createEntityLink(input: $input) {
+      id
+    }
+  }
+`;
+
+const DELETE_ENTITY_LINK = gql`
+  mutation DeleteEntityLink($id: ID!) {
+    deleteEntityLink(id: $id)
+  }
+`;
+
+const SEARCH_ENTITIES = gql`
+  query SearchEntities($query: String!, $limit: Int) {
+    searchEntities(query: $query, limit: $limit) {
+      id
+      displayName
+      entityType
+      tags
+    }
+  }
+`;
+
 const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const isNewEntity = !entity;
   const canWrite = userRole === 'admin' || userRole === 'investigator';
@@ -148,6 +189,93 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
     },
     skip: isNewEntity
   });
+
+  const { data: linksData, refetch: refetchLinks } = useQuery(GET_ENTITY_LINKS, {
+    variables: {
+      entityId: entity?.id,
+      limit: 100,
+      offset: 0
+    },
+    skip: isNewEntity
+  });
+
+  const [createEntityLink] = useMutation(CREATE_ENTITY_LINK, {
+    onCompleted: () => {
+      if (refetchLinks) refetchLinks();
+    }
+  });
+
+  const [deleteEntityLink] = useMutation(DELETE_ENTITY_LINK, {
+    onCompleted: () => {
+      if (refetchLinks) refetchLinks();
+    }
+  });
+
+  const [searchEntities, { data: searchData }] = useLazyQuery(SEARCH_ENTITIES);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [selectedTargetId, setSelectedTargetId] = useState('');
+  const [relationType, setRelationType] = useState('associates_with');
+  const [linkConfidence, setLinkConfidence] = useState(1.0);
+  const [linkNotes, setLinkNotes] = useState('');
+
+  const handleSearchEntities = async (value) => {
+    setLinkSearch(value);
+    if (!value || value.trim().length < 2) return;
+    try {
+      await searchEntities({
+        variables: { query: value.trim(), limit: 10 }
+      });
+    } catch (err) {
+      console.error('Entity search failed:', err);
+    }
+  };
+
+  const handleCreateLink = async () => {
+    if (!canWrite) {
+      showNotification('You do not have permission to modify relationships', 'error');
+      return;
+    }
+    if (!entity?.id || !selectedTargetId) {
+      showNotification('Select a target entity', 'error');
+      return;
+    }
+    if (!relationType) {
+      showNotification('Provide a relation type', 'error');
+      return;
+    }
+
+    try {
+      await createEntityLink({
+        variables: {
+          input: {
+            fromEntityId: entity.id,
+            toEntityId: selectedTargetId,
+            relationType,
+            confidence: parseFloat(linkConfidence),
+            notes: linkNotes || null
+          }
+        }
+      });
+      setSelectedTargetId('');
+      setLinkNotes('');
+      showNotification('Relationship created', 'success');
+    } catch (err) {
+      console.error('Error creating relationship:', err);
+      showNotification(`Failed to create relationship: ${err.message}`, 'error');
+    }
+  };
+
+  const handleDeleteLink = async (id) => {
+    if (!canWrite) return;
+    if (!window.confirm('Delete this relationship?')) return;
+    try {
+      await deleteEntityLink({ variables: { id } });
+      showNotification('Relationship deleted', 'success');
+    } catch (err) {
+      console.error('Error deleting relationship:', err);
+      showNotification(`Failed to delete relationship: ${err.message}`, 'error');
+    }
+  };
 
   useEffect(() => {
     if (entityData?.entity) {
@@ -442,6 +570,123 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
               ) : (
                 <div style={{ color: '#888', fontSize: '14px' }}>
                   No presences yet. Linking this entity to an annotation will create one.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isNewEntity && (
+            <div className="form-section">
+              <h3>Relationships</h3>
+
+              {canWrite && (
+                <div style={{ marginBottom: '12px' }}>
+                  <div className="form-group">
+                    <label>Find target entity</label>
+                    <input
+                      type="text"
+                      value={linkSearch}
+                      onChange={(e) => handleSearchEntities(e.target.value)}
+                      placeholder="Search by name..."
+                      className="form-control"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Target entity</label>
+                    <select
+                      value={selectedTargetId}
+                      onChange={(e) => setSelectedTargetId(e.target.value)}
+                      className="form-control"
+                    >
+                      <option value="">Select…</option>
+                      {(searchData?.searchEntities || [])
+                        .filter((e) => e.id !== entity?.id)
+                        .map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {(e.displayName || 'Unnamed')} ({e.entityType})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Relation type</label>
+                    <input
+                      type="text"
+                      value={relationType}
+                      onChange={(e) => setRelationType(e.target.value)}
+                      placeholder="e.g. knows, owns, drives, associates_with"
+                      className="form-control"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Confidence (0-1)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={linkConfidence}
+                      onChange={(e) => setLinkConfidence(e.target.value)}
+                      className="form-control"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Notes</label>
+                    <input
+                      type="text"
+                      value={linkNotes}
+                      onChange={(e) => setLinkNotes(e.target.value)}
+                      placeholder="Optional"
+                      className="form-control"
+                    />
+                  </div>
+
+                  <button className="btn-save" onClick={handleCreateLink}>
+                    + Add Relationship
+                  </button>
+                </div>
+              )}
+
+              {linksData?.entityLinks?.length > 0 ? (
+                <div className="attributes-list">
+                  {linksData.entityLinks.map((l) => {
+                    const isOutgoing = l.fromEntityId === entity?.id;
+                    const other = isOutgoing ? l.toEntity : l.fromEntity;
+                    const directionLabel = isOutgoing ? '→' : '←';
+                    return (
+                      <div key={l.id} className="attribute-item">
+                        <div className="attribute-info">
+                          <div className="attribute-name">
+                            {directionLabel} {l.relationType}
+                          </div>
+                          <div className="attribute-value">
+                            {other?.displayName || 'Unnamed'} ({other?.entityType || 'unknown'})
+                          </div>
+                          <div className="attribute-meta">
+                            Confidence: {l.confidence != null ? `${Math.round(l.confidence * 100)}%` : 'n/a'}
+                          </div>
+                          {l.notes && (
+                            <div className="attribute-meta">
+                              Notes: {l.notes}
+                            </div>
+                          )}
+                        </div>
+                        {canWrite && (
+                          <button className="btn-delete-attr" onClick={() => handleDeleteLink(l.id)}>
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ color: '#888', fontSize: '14px' }}>
+                  No relationships yet.
                 </div>
               )}
             </div>
