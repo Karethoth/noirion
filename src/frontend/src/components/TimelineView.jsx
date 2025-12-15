@@ -15,7 +15,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const GET_EVENTS = gql`
+export const GET_EVENTS = gql`
   query GetEvents($before: String) {
     events(before: $before, limit: 500, offset: 0) {
       id
@@ -28,7 +28,7 @@ const GET_EVENTS = gql`
   }
 `;
 
-const CREATE_EVENT = gql`
+export const CREATE_EVENT = gql`
   mutation CreateEvent($input: CreateEventInput!) {
     createEvent(input: $input) {
       id
@@ -36,13 +36,13 @@ const CREATE_EVENT = gql`
   }
 `;
 
-const DELETE_EVENT = gql`
+export const DELETE_EVENT = gql`
   mutation DeleteEvent($id: ID!) {
     deleteEvent(id: $id)
   }
 `;
 
-const UPDATE_EVENT = gql`
+export const UPDATE_EVENT = gql`
   mutation UpdateEvent($id: ID!, $input: UpdateEventInput!) {
     updateEvent(id: $id, input: $input) {
       id
@@ -281,8 +281,9 @@ const TimelineView = ({ userRole, timeCursor, onTimeCursorChange }) => {
 
       <div className="timeline-controls">
         <div className="timeline-control">
-          <label>Show events up to</label>
+          <label htmlFor="events-before">Show events up to</label>
           <input
+            id="events-before"
             type="datetime-local"
             value={currentCursorDate ? toDatetimeLocalValue(currentCursorDate) : ''}
             onChange={(e) => handleCursorDateChange(e.target.value)}
@@ -308,32 +309,53 @@ const TimelineView = ({ userRole, timeCursor, onTimeCursorChange }) => {
           <h3>Create Event</h3>
           <div className="timeline-form-row">
             <div className="timeline-form-field">
-              <label>Occurred at</label>
+              <label htmlFor="create-occurred-at">Occurred at</label>
               <input
+                id="create-occurred-at"
                 type="datetime-local"
                 value={newOccurredAt}
                 onChange={(e) => setNewOccurredAt(e.target.value)}
               />
             </div>
             <div className="timeline-form-field">
-              <label>Title</label>
-              <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Short title" />
+              <label htmlFor="create-title">Title</label>
+              <input
+                id="create-title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="Short title"
+              />
             </div>
           </div>
           <div className="timeline-form-row">
             <div className="timeline-form-field">
-              <label>Latitude</label>
-              <input value={newLat} onChange={(e) => setNewLat(e.target.value)} placeholder="Optional" />
+              <label htmlFor="create-latitude">Latitude</label>
+              <input
+                id="create-latitude"
+                value={newLat}
+                onChange={(e) => setNewLat(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
             <div className="timeline-form-field">
-              <label>Longitude</label>
-              <input value={newLng} onChange={(e) => setNewLng(e.target.value)} placeholder="Optional" />
+              <label htmlFor="create-longitude">Longitude</label>
+              <input
+                id="create-longitude"
+                value={newLng}
+                onChange={(e) => setNewLng(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
           </div>
           <div className="timeline-form-row">
             <div className="timeline-form-field full">
-              <label>Description</label>
-              <input value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Optional" />
+              <label htmlFor="create-description">Description</label>
+              <input
+                id="create-description"
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
           </div>
           <button className="timeline-primary" onClick={handleCreateEvent}>Create</button>
@@ -345,32 +367,52 @@ const TimelineView = ({ userRole, timeCursor, onTimeCursorChange }) => {
           <h3>Edit Event</h3>
           <div className="timeline-form-row">
             <div className="timeline-form-field">
-              <label>Occurred at</label>
+              <label htmlFor="edit-occurred-at">Occurred at</label>
               <input
+                id="edit-occurred-at"
                 type="datetime-local"
                 value={editOccurredAt}
                 onChange={(e) => setEditOccurredAt(e.target.value)}
               />
             </div>
             <div className="timeline-form-field">
-              <label>Title</label>
-              <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+              <label htmlFor="edit-title">Title</label>
+              <input
+                id="edit-title"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+              />
             </div>
           </div>
           <div className="timeline-form-row">
             <div className="timeline-form-field">
-              <label>Latitude</label>
-              <input value={editLat} onChange={(e) => setEditLat(e.target.value)} placeholder="Optional" />
+              <label htmlFor="edit-latitude">Latitude</label>
+              <input
+                id="edit-latitude"
+                value={editLat}
+                onChange={(e) => setEditLat(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
             <div className="timeline-form-field">
-              <label>Longitude</label>
-              <input value={editLng} onChange={(e) => setEditLng(e.target.value)} placeholder="Optional" />
+              <label htmlFor="edit-longitude">Longitude</label>
+              <input
+                id="edit-longitude"
+                value={editLng}
+                onChange={(e) => setEditLng(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
           </div>
           <div className="timeline-form-row">
             <div className="timeline-form-field full">
-              <label>Description</label>
-              <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Optional" />
+              <label htmlFor="edit-description">Description</label>
+              <input
+                id="edit-description"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Optional"
+              />
             </div>
           </div>
 
