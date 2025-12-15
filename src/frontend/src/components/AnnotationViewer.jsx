@@ -1,17 +1,58 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useMutation, useLazyQuery } from '@apollo/client/react';
+import { gql } from '@apollo/client';
 import './AnnotationViewer.css';
 
-/**
- * AnnotationViewer - A React component for viewing images with annotation support
- * Supports drawing boxes, polygons, and freehand shapes on images with zoom and pan
- *
- * Tagging System:
- * - Simple tags: #tagname (e.g., #vehicle, #person)
- * - Type:Value tags: #type:value (e.g., #car:FLJ-191, #license_plate:ABC-123)
- * - Supports alphanumeric characters, hyphens (-), and underscores (_)
- * - Examples: #vehicle-type:sedan, #license_plate:XYZ-789, #building_type:residential
- */
-const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId }) => {
+const SEARCH_ENTITIES_BY_TAG = gql`
+  query SearchEntitiesByTag($query: String!, $limit: Int) {
+    searchEntities(query: $query, limit: $limit) {
+      id
+      displayName
+      entityType
+      tags
+    }
+  }
+`;
+
+const LINK_ENTITY_TO_ANNOTATION = gql`
+  mutation LinkEntityToAnnotation(
+    $annotationId: ID!
+    $entityId: ID!
+    $relationType: String
+    $confidence: Float
+    $notes: String
+  ) {
+    linkEntityToAnnotation(
+      annotationId: $annotationId
+      entityId: $entityId
+      relationType: $relationType
+      confidence: $confidence
+      notes: $notes
+    ) {
+      id
+      entityId
+      entity {
+        id
+        displayName
+        entityType
+        tags
+      }
+      relationType
+      confidence
+      notes
+    }
+  }
+`;
+
+const UNLINK_ENTITY_FROM_ANNOTATION = gql`
+  mutation UnlinkEntityFromAnnotation($linkId: ID!) {
+    unlinkEntityFromAnnotation(linkId: $linkId) {
+      id
+    }
+  }
+`;
+
+const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId, onRefetch }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
   const imageContainerRef = useRef(null);
@@ -31,6 +72,8 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [imageLoaded, setImageLoaded] = useState(false);
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState(null);
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
+  const [entitySuggestions, setEntitySuggestions] = useState([]);
+  const [pendingAnnotationData, setPendingAnnotationData] = useState(null);
 
   // Zoom and pan state
   const [scale, setScale] = useState(1);
@@ -38,6 +81,200 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState(null);
   const hasInitializedZoom = useRef(false);
+
+  // Entity search query
+  const [searchEntitiesByTag] = useLazyQuery(SEARCH_ENTITIES_BY_TAG);
+
+  // Entity linking mutations
+  const [linkEntity] = useMutation(LINK_ENTITY_TO_ANNOTATION, {
+    onCompleted: () => {
+      // Refetch annotations to show updated entity links
+      if (onRefetch) {
+        onRefetch();
+      }
+    }
+  });
+
+  const [unlinkEntity] = useMutation(UNLINK_ENTITY_FROM_ANNOTATION, {
+    onCompleted: () => {
+      // Refetch annotations to show updated entity links
+      if (onRefetch) {
+        onRefetch();
+      }
+    }
+  });
+
+  const handleUnlinkEntity = async (linkId) => {
+    try {
+      await unlinkEntity({
+        variables: {
+          linkId
+        }
+      });
+    } catch (error) {
+      console.error('Error unlinking entity:', error);
+      alert('Failed to unlink entity');
+    }
+  };
+
+  const handleSaveAnnotationWithEntities = async (selectedEntityIds) => {
+    if (!pendingAnnotationData || !onAnnotationCreate) return;
+
+    // Check if this is an edit (has id) or new annotation
+    const isEdit = !!pendingAnnotationData.id;
+
+    // Replace tag placeholders with entity slugs in description
+    let updatedDescription = pendingAnnotationData.description;
+    const entitySlugMap = {}; // Map slugs to entity IDs
+
+    for (let i = 0; i < entitySuggestions.length; i++) {
+      const suggestion = entitySuggestions[i];
+      const selectedEntityId = selectedEntityIds[i];
+
+      if (selectedEntityId) {
+        // Find the selected entity
+        const selectedEntity = suggestion.entities.find(e => e.id === selectedEntityId);
+        if (selectedEntity) {
+          // Generate slug from entity display name
+          const slug = generateSlug(selectedEntity.displayName);
+          const [tagType] = suggestion.tag.split(':');
+
+          // Replace the partial tag with the full tag using slug
+          // e.g., replace "#person:J" with "#person:john-doe"
+          const tagPattern = new RegExp(`#${suggestion.tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\w)`, 'g');
+          const newTag = `#${tagType}:${slug}`;
+          updatedDescription = updatedDescription.replace(tagPattern, newTag);
+
+          // Store the slug-to-entity mapping
+          entitySlugMap[`${tagType}:${slug}`] = selectedEntityId;
+        }
+      }
+    }
+
+    // Update the pending annotation data with the modified description and re-extract tags
+    const updatedTags = extractTags(updatedDescription); // Re-extract tags to include the full slugs
+    const dataToSave = {
+      ...pendingAnnotationData,
+      description: updatedDescription,
+      tags: updatedTags
+    };
+
+    // Save/create the annotation first
+    const savedAnnotation = await onAnnotationCreate(dataToSave, isEdit ? { edit: true } : undefined);
+
+    // Use the annotation id (either from edit or newly created)
+    const annotationId = isEdit ? pendingAnnotationData.id : savedAnnotation?.id;
+
+    // Link selected entities with their associated slugs as relation_type
+    if (annotationId && Object.keys(entitySlugMap).length > 0) {
+      for (const [slugTag, entityId] of Object.entries(entitySlugMap)) {
+        try {
+          await linkEntity({
+            variables: {
+              annotationId,
+              entityId: entityId,
+              relationType: slugTag, // Store the full slug tag (e.g., "person:john-doe")
+              confidence: 1.0
+            }
+          });
+        } catch (error) {
+          console.error('Error linking entity:', error);
+        }
+      }
+    }
+
+    // Clear state
+    setPendingAnnotationData(null);
+    setEntitySuggestions([]);
+    setPendingRegion(null);
+    setDescription('');
+
+    // If editing, just exit edit mode but keep the annotation selected
+    if (isEdit) {
+      setEditingDescription(false);
+      // Don't clear selection - let the refetch update the view
+    }
+  };  const handleSkipEntitySuggestions = () => {
+    if (!pendingAnnotationData || !onAnnotationCreate) return;
+
+    const isEdit = !!pendingAnnotationData.id;
+    // When skipping, keep the tags as-is in the description
+    onAnnotationCreate(pendingAnnotationData, isEdit ? { edit: true } : undefined);
+
+    setPendingAnnotationData(null);
+    setEntitySuggestions([]);
+    setPendingRegion(null);
+    setDescription('');
+
+    // If editing, just exit edit mode but keep the annotation selected
+    if (isEdit) {
+      setEditingDescription(false);
+      // Don't clear selection
+    }
+  };
+
+  const handleEditAnnotationSave = async () => {
+    if (!selectedRegion) return;
+
+    const tags = extractTags(editDescValue);
+    const entityTypeTags = extractEntityTypeTags(tags);
+
+    // If there are new entity-type tags, search for matching entities
+    if (entityTypeTags.length > 0) {
+      const annotationData = {
+        ...selectedRegion,
+        description: editDescValue,
+        tags
+      };
+      setPendingAnnotationData(annotationData);
+
+      // Search for each entity-type tag
+      const suggestions = [];
+      for (const tag of entityTypeTags) {
+        const [, value] = tag.split(':');
+        if (value) {
+          try {
+            const result = await searchEntitiesByTag({
+              variables: {
+                query: value,
+                limit: 5
+              }
+            });
+
+            if (result.data?.searchEntities) {
+              const matchingEntities = result.data.searchEntities.filter(entity =>
+                entity.tags?.some(t => t.toLowerCase().includes(value.toLowerCase())) ||
+                entity.displayName?.toLowerCase().includes(value.toLowerCase())
+              );
+
+              if (matchingEntities.length > 0) {
+                suggestions.push({
+                  tag,
+                  entities: matchingEntities
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error searching entities:', error);
+          }
+        }
+      }
+
+      if (suggestions.length > 0) {
+        setEntitySuggestions(suggestions);
+        setEditingDescription(false);
+        return; // Don't save yet, show suggestions first
+      }
+    }
+
+    // No entity suggestions, save normally with updated tags
+    const updated = { ...selectedRegion, description: editDescValue, tags };
+    _setSelectedRegion(updated);
+    setEditingDescription(false);
+    if (typeof onAnnotationCreate === 'function') {
+      onAnnotationCreate(updated, { edit: true });
+    }
+  };
 
   const drawBox = useCallback((ctx, coords, style, isSelected) => {
     const { x, y, width, height } = coords;
@@ -296,6 +533,17 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     }
   }, [pendingRegion]);
 
+  // Clear selected annotation if it no longer exists (e.g., was deleted)
+  useEffect(() => {
+    if (selectedRegion) {
+      const stillExists = annotations.some(ann => ann.id === selectedRegion.id);
+      if (!stillExists) {
+        _setSelectedRegion(null);
+        setEditingDescription(false);
+      }
+    }
+  }, [annotations, selectedRegion]);
+
   function extractTags(desc) {
     // Match tags with format: #tagtype or #tagtype:value
     // Supports alphanumeric, hyphens, underscores, and colons
@@ -305,13 +553,83 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     return matches.map(t => t.slice(1)); // Remove the # prefix
   }
 
-  const handleMetadataSubmit = (e) => {
+  // Extract entity-type tags (tags that could be entities like person:name, car:plate)
+  function extractEntityTypeTags(tags) {
+    const entityTypes = ['person', 'vehicle', 'object', 'location', 'organization'];
+    return tags.filter(tag => {
+      const [type] = tag.split(':');
+      return entityTypes.includes(type.toLowerCase());
+    });
+  }
+
+  // Generate a tag-safe slug from display name
+  function generateSlug(displayName) {
+    return displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-') // Replace non-alphanumeric chars with hyphens
+      .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+  }
+
+  const handleMetadataSubmit = async (e) => {
     e.preventDefault();
-    if (pendingRegion && onAnnotationCreate) {
+    if (!pendingRegion) return;
+
+    const tags = extractTags(description);
+    const entityTypeTags = extractEntityTypeTags(tags);
+
+    // If there are entity-type tags, search for matching entities
+    if (entityTypeTags.length > 0) {
+      const annotationData = {
+        ...pendingRegion,
+        description,
+        tags
+      };
+      setPendingAnnotationData(annotationData);
+
+      // Search for each entity-type tag
+      const suggestions = [];
+      for (const tag of entityTypeTags) {
+        const [, value] = tag.split(':');
+        if (value) {
+          try {
+            const result = await searchEntitiesByTag({
+              variables: {
+                query: value,
+                limit: 5
+              }
+            });
+
+            if (result.data?.searchEntities) {
+              const matchingEntities = result.data.searchEntities.filter(entity =>
+                entity.tags?.some(t => t.toLowerCase().includes(value.toLowerCase())) ||
+                entity.displayName?.toLowerCase().includes(value.toLowerCase())
+              );
+
+              if (matchingEntities.length > 0) {
+                suggestions.push({
+                  tag,
+                  entities: matchingEntities
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error searching entities:', error);
+          }
+        }
+      }
+
+      if (suggestions.length > 0) {
+        setEntitySuggestions(suggestions);
+        return; // Don't save yet, show suggestions first
+      }
+    }
+
+    // No entity suggestions, save normally
+    if (onAnnotationCreate) {
       onAnnotationCreate({
         ...pendingRegion,
         description,
-        tags: extractTags(description)
+        tags
       });
     }
     setPendingRegion(null);
@@ -332,13 +650,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const handleEditAnnotationKeyDown = (e) => {
     if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
       e.preventDefault();
-      if (!selectedRegion) return;
-      const updated = { ...selectedRegion, description: editDescValue };
-      _setSelectedRegion(updated);
-      setEditingDescription(false);
-      if (typeof onAnnotationCreate === 'function') {
-        onAnnotationCreate(updated, { edit: true });
-      }
+      handleEditAnnotationSave();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setEditingDescription(false);
@@ -453,16 +765,41 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                   if (setSelectedAnnotationId) setSelectedAnnotationId(annotation.id);
                 }}
               >
-                <span
-                  style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isSelected ? 'bold' : 'normal' }}
-                  title={annotation.description}
-                >
-                  {annotation.description?.slice(0, 32) || 'Untitled'}
-                </span>
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div
+                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isSelected ? 'bold' : 'normal' }}
+                    title={annotation.description}
+                  >
+                    {annotation.description?.slice(0, 32) || 'Untitled'}
+                  </div>
+                  {annotation.entityLinks && annotation.entityLinks.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {annotation.entityLinks.map(link => (
+                        <span
+                          key={link.id}
+                          style={{
+                            fontSize: 10,
+                            padding: '2px 6px',
+                            background: '#4a9eff',
+                            color: 'white',
+                            borderRadius: 3,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '100px'
+                          }}
+                          title={link.entity?.displayName || 'Unknown Entity'}
+                        >
+                          {link.entity?.displayName?.slice(0, 12) || '???'}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {!readOnly && (
                   <button
                     title="Delete annotation"
-                    style={{ marginLeft: 8, background: 'none', border: 'none', color: '#c00', fontSize: 18, cursor: 'pointer' }}
+                    style={{ marginLeft: 8, background: 'none', border: 'none', color: '#c00', fontSize: 18, cursor: 'pointer', flexShrink: 0 }}
                     onClick={e => { e.stopPropagation(); onAnnotationDelete && onAnnotationDelete(annotation.id); }}
                   >×</button>
                 )}
@@ -579,6 +916,125 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           </div>
         )}
 
+        {/* Entity Suggestions UI */}
+        {entitySuggestions.length > 0 && (
+          <div className="entity-suggestions-panel" style={{
+            background: '#2a2a2a',
+            border: '2px solid #4a9eff',
+            borderRadius: 8,
+            padding: 16,
+            margin: '16px 0'
+          }}>
+            <h3 style={{ marginTop: 0, color: '#4a9eff' }}>🔗 Link Entities to Annotation</h3>
+            <p style={{ color: '#b0b0b0', fontSize: 14, marginBottom: 12 }}>
+              We found entities that match your tags. Select which ones to link:
+            </p>
+
+            {entitySuggestions.map((suggestion, idx) => (
+              <div key={idx} style={{ marginBottom: 16, padding: 12, background: '#1e1e1e', borderRadius: 6 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <strong style={{ color: '#e0e0e0' }}>Tag: #{suggestion.tag}</strong>
+                  <span style={{ marginLeft: 8, fontSize: 12, color: '#999' }}>
+                    (Select one entity for this tag)
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: 6, background: '#2a2a2a', borderRadius: 4 }}>
+                    <input
+                      type="radio"
+                      name={`entity-${idx}`}
+                      value=""
+                      defaultChecked
+                      style={{ marginRight: 8 }}
+                    />
+                    <div style={{ color: '#999', fontStyle: 'italic' }}>Skip - Don't link any entity</div>
+                  </label>
+                  {suggestion.entities.map(entity => (
+                    <label key={entity.id} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: 6, background: '#2a2a2a', borderRadius: 4 }}>
+                      <input
+                        type="radio"
+                        name={`entity-${idx}`}
+                        value={entity.id}
+                        style={{ marginRight: 8 }}
+                      />
+                      <div>
+                        <div style={{ color: '#e0e0e0', fontWeight: 500 }}>{entity.displayName}</div>
+                        <div style={{ fontSize: 12, color: '#999' }}>
+                          <span style={{ padding: '2px 6px', background: '#444', borderRadius: 3, marginRight: 6 }}>
+                            {entity.entityType}
+                          </span>
+                          {entity.tags && entity.tags.slice(0, 2).map(tag => {
+                            // Strip "general:" prefix for cleaner display
+                            return tag.startsWith('general:') ? tag.substring(8) : tag;
+                          }).join(', ')}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button
+                onClick={() => {
+                  const selectedIds = [];
+                  // Get selected entity for each tag (radio button groups)
+                  for (let i = 0; i < entitySuggestions.length; i++) {
+                    const radio = document.querySelector(`.entity-suggestions-panel input[name="entity-${i}"]:checked`);
+                    if (radio && radio.value) {
+                      selectedIds.push(radio.value);
+                    } else {
+                      selectedIds.push(null); // No entity selected for this tag
+                    }
+                  }
+                  handleSaveAnnotationWithEntities(selectedIds);
+                }}
+                style={{
+                  background: '#4a9eff',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+              >
+                Link Selected & Save
+              </button>
+              <button
+                onClick={handleSkipEntitySuggestions}
+                style={{
+                  background: '#555',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: 4,
+                  cursor: 'pointer'
+                }}
+              >
+                Skip & Save Without Linking
+              </button>
+              <button
+                onClick={() => {
+                  setEntitySuggestions([]);
+                  setPendingAnnotationData(null);
+                }}
+                style={{
+                  background: 'transparent',
+                  color: '#999',
+                  border: '1px solid #555',
+                  padding: '8px 16px',
+                  borderRadius: 4,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {selectedRegion && editingDescription && !readOnly && (
           <div className="annotation-details">
             <h3>Edit Description</h3>
@@ -592,15 +1048,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               placeholder="Ctrl+Enter for new line, Enter to save, Esc to cancel"
             />
             <div style={{ marginTop: 8 }}>
-              <button onClick={() => {
-                if (!selectedRegion) return;
-                const updated = { ...selectedRegion, description: editDescValue };
-                _setSelectedRegion(updated);
-                setEditingDescription(false);
-                if (typeof onAnnotationCreate === 'function') {
-                  onAnnotationCreate(updated, { edit: true });
-                }
-              }}>
+              <button onClick={handleEditAnnotationSave}>
                 Save
               </button>
               <button style={{ marginLeft: 8 }} onClick={() => {
@@ -630,6 +1078,79 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                 })}
               </div>
             )}
+
+            {/* Entity Links Section */}
+            <div className="annotation-entity-links" style={{ marginTop: 16 }}>
+              <h4 style={{ marginBottom: 8, fontSize: 14, color: '#b0b0b0' }}>Linked Entities</h4>
+              {selectedRegion.entityLinks && selectedRegion.entityLinks.length > 0 ? (
+                <div style={{ marginBottom: 8 }}>
+                  {selectedRegion.entityLinks.map(link => (
+                    <div key={link.id} className="entity-link-item" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      background: '#2a2a2a',
+                      borderRadius: 4,
+                      marginBottom: 4
+                    }}>
+                      <div>
+                        <span style={{ fontWeight: 500, color: '#e0e0e0' }}>
+                          {link.entity?.displayName || 'Unknown Entity'}
+                        </span>
+                        {link.relationType && (
+                          <span style={{
+                            marginLeft: 8,
+                            padding: '2px 6px',
+                            background: '#2a5a8a',
+                            borderRadius: 3,
+                            fontSize: 11,
+                            color: '#aaf'
+                          }}>
+                            #{link.relationType}
+                          </span>
+                        )}
+                        {link.entity?.entityType && (
+                          <span style={{
+                            marginLeft: 8,
+                            padding: '2px 6px',
+                            background: '#444',
+                            borderRadius: 3,
+                            fontSize: 11,
+                            color: '#aaa'
+                          }}>
+                            [{link.entity.entityType}]
+                          </span>
+                        )}
+                      </div>
+                      {!readOnly && (
+                        <button
+                          onClick={() => handleUnlinkEntity(link.id)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#c00',
+                            fontSize: 18,
+                            cursor: 'pointer',
+                            padding: '0 4px'
+                          }}
+                          title="Unlink entity"
+                        >×</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: '#999', fontSize: 13, fontStyle: 'italic' }}>No entities linked</p>
+              )}
+
+              {!readOnly && selectedRegion.entityLinks && selectedRegion.entityLinks.length === 0 && (
+                <p style={{ color: '#999', fontSize: 12, fontStyle: 'italic', marginTop: 8 }}>
+                  💡 Tip: Add entity tags like #person:John or #car:ABC-123 to link entities
+                </p>
+              )}
+            </div>
+
             {!readOnly && (
               <div className="annotation-details-actions">
                 <button

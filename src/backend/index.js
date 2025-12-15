@@ -8,6 +8,10 @@ import { pool, testConnection } from './src/db/connection.js';
 import userResolvers from './src/graphql/resolvers/user.resolver.js';
 import imageResolvers from './src/graphql/resolvers/image.resolver.js';
 import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js';
+import entityResolvers from './src/graphql/resolvers/entity.resolver.js';
+import presenceResolvers from './src/graphql/resolvers/presence.resolver.js';
+import entityLinkResolvers from './src/graphql/resolvers/entity-link.resolver.js';
+import eventResolvers from './src/graphql/resolvers/event.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 import { getUserFromAuthHeader } from './src/utils/auth.js';
@@ -44,15 +48,27 @@ const resolvers = {
     },
     ...userResolvers.Query,
     ...imageResolvers.Query,
-    ...annotationResolvers.Query
+    ...annotationResolvers.Query,
+    ...entityResolvers.Query,
+    ...presenceResolvers.Query,
+    ...entityLinkResolvers.Query,
+    ...eventResolvers.Query
   },
   Mutation: {
     ...userResolvers.Mutation,
     ...imageResolvers.Mutation,
-    ...annotationResolvers.Mutation
+    ...annotationResolvers.Mutation,
+    ...entityResolvers.Mutation,
+    ...presenceResolvers.Mutation,
+    ...entityLinkResolvers.Mutation,
+    ...eventResolvers.Mutation
   },
   Image: imageResolvers.Image,
-  Annotation: annotationResolvers.Annotation
+  Annotation: annotationResolvers.Annotation,
+  Entity: entityResolvers.Entity,
+  Presence: presenceResolvers.Presence,
+  PresenceEntity: presenceResolvers.PresenceEntity,
+  EntityLink: entityLinkResolvers.EntityLink
 };
 
 async function startServer() {
@@ -88,6 +104,11 @@ async function startServer() {
     '/graphql',
     GraphQLUpload.graphqlUploadExpress({ maxFileSize: 100000000, maxFiles: 10 })
   );
+
+  // Handle OPTIONS requests for CORS preflight
+  app.options('/graphql', (req, res) => {
+    res.status(200).end();
+  });
 
   // Apply Apollo Server middleware manually
   app.post('/graphql', async (req, res) => {

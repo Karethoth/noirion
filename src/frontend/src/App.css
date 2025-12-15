@@ -30,6 +30,36 @@
   z-index: 1000;
   flex-shrink: 0;
   min-height: 56px;
+  gap: 16px;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-tab {
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e0e0e0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.nav-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.nav-tab.active {
+  background: rgba(0, 123, 255, 0.3);
+  border-color: rgba(0, 123, 255, 0.5);
+  color: white;
 }
 
 .nav-actions {
@@ -99,6 +129,14 @@
   background-color: rgba(220, 53, 69, 0.8);
   border-color: rgba(220, 53, 69, 0.8);
   color: white;
+}
+
+/* Content Container */
+.content-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Map Container - Full Screen */

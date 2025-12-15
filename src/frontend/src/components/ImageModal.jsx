@@ -19,6 +19,19 @@ const GET_ANNOTATIONS = gql`
         coordinates
         style
       }
+      entityLinks {
+        id
+        entityId
+        entity {
+          id
+          displayName
+          entityType
+          tags
+        }
+        relationType
+        confidence
+        notes
+      }
     }
   }
 `;
@@ -144,10 +157,11 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
             image={{ ...image, filePath: `${import.meta.env.VITE_API_URL}${image.filePath}` }}
             annotations={data?.annotations || []}
             readOnly={readOnly}
+            onRefetch={refetch}
             onAnnotationCreate={async (input, opts) => {
               // If opts.edit, update existing annotation, else create new
               if (opts && opts.edit && input.id) {
-                await updateAnnotation({
+                const result = await updateAnnotation({
                   variables: {
                     id: input.id,
                     input: {
@@ -158,7 +172,8 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
                   },
                 });
                 refetch();
-                return;
+                // Return the updated annotation with id so entity linking works
+                return { ...result.data.updateAnnotation, id: input.id };
               }
               // Create a new annotation with region and description
               const res = await addAnnotation({
