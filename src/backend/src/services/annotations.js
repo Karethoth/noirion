@@ -146,10 +146,10 @@ export class AnnotationService {
         JSON.stringify(coordinates),
         JSON.stringify(style || { color: '#ff0000', strokeWidth: 2 })
       ]);
-      
+
       // Update annotation timestamp
       await client.query('UPDATE annotations SET updated_at = NOW() WHERE id = $1', [annotationId]);
-      
+
       return this.formatRegion(result.rows[0]);
     } finally {
       client.release();
@@ -184,17 +184,17 @@ export class AnnotationService {
         RETURNING *
       `;
       const result = await client.query(query, values);
-      
+
       if (result.rows.length === 0) {
         throw new Error('Region not found');
       }
-      
+
       // Update annotation timestamp
       await client.query(
         'UPDATE annotations SET updated_at = NOW() WHERE id = (SELECT annotation_id FROM annotation_regions WHERE id = $1)',
         [regionId]
       );
-      
+
       return this.formatRegion(result.rows[0]);
     } finally {
       client.release();
@@ -209,19 +209,19 @@ export class AnnotationService {
         'SELECT annotation_id FROM annotation_regions WHERE id = $1',
         [regionId]
       );
-      
+
       if (annotationResult.rows.length === 0) {
         throw new Error('Region not found');
       }
-      
+
       const annotationId = annotationResult.rows[0].annotation_id;
-      
+
       // Delete region
       await client.query('DELETE FROM annotation_regions WHERE id = $1', [regionId]);
-      
+
       // Update annotation timestamp
       await client.query('UPDATE annotations SET updated_at = NOW() WHERE id = $1', [annotationId]);
-      
+
       return true;
     } finally {
       client.release();
@@ -241,11 +241,11 @@ export class AnnotationService {
         GROUP BY a.id
       `;
       const result = await client.query(query, [annotationId]);
-      
+
       if (result.rows.length === 0) {
         return null;
       }
-      
+
       return this.formatAnnotation(result.rows[0]);
     } finally {
       client.release();
@@ -297,6 +297,137 @@ export class AnnotationService {
       `;
       const result = await client.query(query, [annotationId]);
       return result.rows.map(row => this.formatEntityLink(row));
+    } finally {
+      client.release();
+    }
+  }
+
+  async linkEntityToAnnotation(annotationId, entityId, { relationType, confidence, notes, observedBy }) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const query = `
+        INSERT INTO annotation_entity_links (annotation_id, entity_id, relation_type, confidence, notes)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+      const result = await client.query(query, [
+        annotationId,
+        entityId,
+        relationType || null,
+        confidence || 1.0,
+        notes || null
+      ]);
+
+      const link = result.rows[0];
+
+      // Auto-create a Presence record for timeline tracking, sourced from the image's EXIF (or upload time).
+      // Dedupe by (source_asset + entity + source_type) to avoid noisy duplicates.
+      const infoResult = await client.query(
+        `
+          SELECT
+            a.asset_id,
+            ass.uploaded_at,
+            ex.capture_timestamp,
+            ST_Y(ex.gps) as latitude,
+            ST_X(ex.gps) as longitude
+          FROM annotations a
+          JOIN assets ass ON ass.id = a.asset_id
+          LEFT JOIN asset_metadata_exif ex ON ex.asset_id = ass.id
+          WHERE a.id = $1
+        `,
+        [annotationId]
+      );
+
+      if (infoResult.rows.length > 0) {
+        const info = infoResult.rows[0];
+        const assetId = info.asset_id;
+        const observedAt = info.capture_timestamp || info.uploaded_at;
+
+        const existingPresence = await client.query(
+          `
+            SELECT p.id
+            FROM presences p
+            JOIN presence_entities pe ON pe.presence_id = p.id
+            WHERE p.source_asset = $1
+              AND p.source_type = $2
+              AND pe.entity_id = $3
+            LIMIT 1
+          `,
+          [assetId, 'annotation_entity_link', entityId]
+        );
+
+        if (existingPresence.rows.length === 0 && observedAt) {
+          const hasPoint = info.latitude !== null && info.latitude !== undefined && info.longitude !== null && info.longitude !== undefined;
+          const geomClause = hasPoint ? 'ST_SetSRID(ST_MakePoint($5, $6), 4326)' : 'NULL';
+
+          const presenceInsert = await client.query(
+            `
+              INSERT INTO presences (
+                observed_at,
+                observed_by,
+                source_asset,
+                source_type,
+                geom,
+                notes,
+                metadata
+              ) VALUES (
+                $1, $2, $3, $4, ${geomClause}, $7, $8
+              )
+              RETURNING id
+            `,
+            [
+              observedAt,
+              observedBy || null,
+              assetId,
+              'annotation_entity_link',
+              hasPoint ? info.longitude : null,
+              hasPoint ? info.latitude : null,
+              notes || null,
+              JSON.stringify({ annotationId, entityId, linkId: link.id })
+            ]
+          );
+
+          const presenceId = presenceInsert.rows[0].id;
+          await client.query(
+            `
+              INSERT INTO presence_entities (presence_id, entity_id, role, confidence)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT (presence_id, entity_id) DO NOTHING
+            `,
+            [presenceId, entityId, relationType || null, confidence || 1.0]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return this.formatEntityLink(link);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error('Error linking entity to annotation:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async unlinkEntityFromAnnotation(linkId) {
+    const client = await this.dbPool.connect();
+    try {
+      const query = `
+        DELETE FROM annotation_entity_links
+        WHERE id = $1
+        RETURNING *
+      `;
+      const result = await client.query(query, [linkId]);
+      if (result.rows.length === 0) {
+        throw new Error('Entity link not found');
+      }
+      return this.formatEntityLink(result.rows[0]);
+    } catch (error) {
+      logger.error('Error unlinking entity from annotation:', error);
+      throw error;
     } finally {
       client.release();
     }

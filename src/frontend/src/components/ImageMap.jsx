@@ -8,11 +8,19 @@ import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
 
-// Module-level flag to ensure bounds fitting happens only once per page load
-let hasEverFitBounds = false;
-
 // Save/restore map position across component remounts
+// Store both in module scope and localStorage for persistence
 let savedMapView = null;
+
+// Load from localStorage on module load
+try {
+  const stored = localStorage.getItem('mapView');
+  if (stored) {
+    savedMapView = JSON.parse(stored);
+  }
+} catch (e) {
+  console.error('Failed to load saved map view:', e);
+}
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -48,17 +56,36 @@ const DELETE_IMAGE = gql`
   }
 `;
 
-// Component to fit bounds to all markers on initial load only
-function FitBounds({ images, hasInitialized }) {
+const GET_EVENTS = gql`
+  query GetEvents($before: String) {
+    events(before: $before, limit: 500, offset: 0) {
+      id
+      occurredAt
+      latitude
+      longitude
+      title
+      description
+    }
+  }
+`;
+
+// Component to restore saved view or fit bounds to markers
+function MapInitializer({ images, hasInitialized }) {
   const map = useMap();
 
   useEffect(() => {
-    // Triple protection: module-level flag, component ref, and check for images
-    if (!hasEverFitBounds && !hasInitialized.current && images.length > 0) {
+    if (hasInitialized.current) return;
+
+    // If we have a saved view, restore it
+    if (savedMapView?.center) {
+      map.setView(savedMapView.center, savedMapView.zoom, { animate: false });
+      hasInitialized.current = true;
+    }
+    // Otherwise, fit bounds to markers if we have images
+    else if (images.length > 0) {
       const bounds = L.latLngBounds(images.map(img => [img.latitude, img.longitude]));
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
       hasInitialized.current = true;
-      hasEverFitBounds = true; // Set module-level flag
     }
     // Only run on mount by excluding images from dependencies
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,13 +99,19 @@ function ViewPersistence() {
   const map = useMap();
 
   useEffect(() => {
-    // Save view on any change (after initial bounds fit)
+    // Save view on any change
     const saveView = () => {
-      if (hasEverFitBounds) {
-        savedMapView = {
-          center: map.getCenter(),
-          zoom: map.getZoom()
-        };
+      const view = {
+        center: map.getCenter(),
+        zoom: map.getZoom()
+      };
+      savedMapView = view;
+
+      // Also persist to localStorage
+      try {
+        localStorage.setItem('mapView', JSON.stringify(view));
+      } catch (e) {
+        console.error('Failed to save map view:', e);
       }
     };
 
@@ -92,7 +125,9 @@ function ViewPersistence() {
   }, [map]);
 
   return null;
-}// Component to apply map style class to container
+}
+
+// Component to apply map style class to container
 function MapStyleController({ style }) {
   const map = useMap();
 
@@ -130,10 +165,14 @@ const MAP_STYLES = {
   }
 };
 
-const ImageMap = ({ userRole }) => {
+const ImageMap = ({ userRole, timeCursor = null }) => {
   const { loading, error, data } = useQuery(GET_IMAGES, {
     fetchPolicy: 'cache-and-network', // Use cache first, then update in background
     nextFetchPolicy: 'cache-first', // After first fetch, prefer cache
+  });
+  const { data: eventsData } = useQuery(GET_EVENTS, {
+    variables: { before: timeCursor || null },
+    fetchPolicy: 'cache-and-network'
   });
   const [deleteImage] = useMutation(DELETE_IMAGE);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -154,8 +193,32 @@ const ImageMap = ({ userRole }) => {
 
   // Memoize images with location to avoid recreating on every render
   const imagesWithLocation = useMemo(() => {
-    return data?.images?.filter(img => img.latitude && img.longitude) || [];
-  }, [data?.images]);
+    const images = data?.images?.filter(img => img.latitude && img.longitude) || [];
+
+    if (!timeCursor) return images;
+
+    const cursor = new Date(timeCursor).getTime();
+    return images.filter((img) => {
+      const t = img.captureTimestamp || img.uploadedAt;
+      if (!t) return false;
+      const ms = new Date(t).getTime();
+      return ms <= cursor;
+    });
+  }, [data?.images, timeCursor]);
+
+  const eventIcon = useMemo(() => {
+    return L.divIcon({
+      className: 'custom-event-marker',
+      html: '<div class="event-marker-inner">E</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+  }, []);
+
+  const eventsWithLocation = useMemo(() => {
+    return (eventsData?.events || []).filter((e) => e.latitude != null && e.longitude != null);
+  }, [eventsData?.events]);
 
   // Calculate distance between two coordinates in meters (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -317,9 +380,36 @@ const ImageMap = ({ userRole }) => {
         />
         <MapStyleController style={mapStyle} />
         {!hasInitializedBounds.current && (
-          <FitBounds images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
+          <MapInitializer images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
         )}
         <ViewPersistence />
+
+        {eventsWithLocation.map((ev) => (
+          <Marker
+            key={`event-${ev.id}`}
+            position={[ev.latitude, ev.longitude]}
+            icon={eventIcon}
+          >
+            <Popup maxWidth={280} minWidth={260}>
+              <div style={{ padding: '4px' }}>
+                <div className="popup-timestamp">
+                  🕒 {ev.occurredAt ? new Date(ev.occurredAt).toLocaleString() : 'Unknown time'}
+                </div>
+                <div className="popup-filename">
+                  {ev.title}
+                </div>
+                {ev.description && (
+                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                    {ev.description}
+                  </div>
+                )}
+                <div className="popup-coordinates" style={{ marginTop: '8px' }}>
+                  📍 {formatMGRS(ev.longitude, ev.latitude)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
 
         {imageGroups.flatMap((group, groupIdx) => {
           const count = group.images.length;
@@ -474,6 +564,9 @@ const ImageMap = ({ userRole }) => {
       {/* Map Info Overlay */}
       <div className="map-info-overlay">
         <strong>{imagesWithLocation.length}</strong> image{imagesWithLocation.length !== 1 ? 's' : ''} with location data
+        {eventsWithLocation.length > 0 && (
+          <> · <span style={{ color: '#888' }}><strong>{eventsWithLocation.length}</strong> event{eventsWithLocation.length !== 1 ? 's' : ''}</span></>
+        )}
         {data?.images?.length > imagesWithLocation.length && (
           <> · <span style={{ color: '#888' }}>{data.images.length - imagesWithLocation.length} without location</span></>
         )}

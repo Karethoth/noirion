@@ -60,6 +60,27 @@ const annotationResolvers = {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.deleteRegion(args.id);
+    },
+
+    linkEntityToAnnotation: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+      const annotationService = new AnnotationService(context.dbPool);
+      return await annotationService.linkEntityToAnnotation(
+        args.annotationId,
+        args.entityId,
+        {
+          relationType: args.relationType,
+          confidence: args.confidence,
+          notes: args.notes,
+          observedBy: context.userId
+        }
+      );
+    },
+
+    unlinkEntityFromAnnotation: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+      const annotationService = new AnnotationService(context.dbPool);
+      return await annotationService.unlinkEntityFromAnnotation(args.linkId);
     }
   },
 
@@ -77,6 +98,23 @@ const annotationResolvers = {
     entityLinks: async (parent, args, context) => {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getEntityLinksByAnnotationId(parent.id);
+    }
+  },
+
+  AnnotationEntityLink: {
+    entity: async (parent, args, context) => {
+      try {
+        const { EntityService } = await import('../../services/entities.js');
+        const entityService = new EntityService(context.dbPool);
+        const entity = await entityService.getEntityById(parent.entityId);
+        if (!entity) {
+          console.warn(`Entity not found for ID: ${parent.entityId}`);
+        }
+        return entity;
+      } catch (error) {
+        console.error(`Error fetching entity ${parent.entityId}:`, error);
+        return null;
+      }
     }
   }
 };

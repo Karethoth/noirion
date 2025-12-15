@@ -11,7 +11,7 @@
     imagesInArea(bounds: BoundsInput!): [Image!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
-    
+
     # Entity queries
     entities(entityType: String, limit: Int, offset: Int): [Entity!]!
     entity(id: ID!): Entity
@@ -34,7 +34,7 @@
     addAnnotationRegion(annotationId: ID!, input: AddRegionInput!): AnnotationRegion!
     updateAnnotationRegion(id: ID!, input: UpdateRegionInput!): AnnotationRegion!
     deleteAnnotationRegion(id: ID!): Boolean!
-    
+
     # Entity mutations
     createEntity(input: CreateEntityInput!): Entity!
     updateEntity(id: ID!, input: UpdateEntityInput!): Entity!
@@ -42,6 +42,10 @@
     addEntityAttribute(entityId: ID!, input: AddEntityAttributeInput!): EntityAttribute!
     updateEntityAttribute(id: ID!, input: UpdateEntityAttributeInput!): EntityAttribute!
     deleteEntityAttribute(id: ID!): Boolean!
+
+    # Entity-Annotation linking mutations
+    linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
   }
 
   type AuthPayload {
@@ -163,6 +167,7 @@
     id: ID!
     annotationId: ID!
     entityId: ID!
+    entity: Entity
     relationType: String
     confidence: Float
     notes: String

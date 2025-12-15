@@ -16,6 +16,15 @@ export const typeDefs = `#graphql
     entities(entityType: String, limit: Int, offset: Int): [Entity!]!
     entity(id: ID!): Entity
     searchEntities(query: String!, entityType: String, limit: Int): [Entity!]!
+
+    # Presence queries
+    presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
+
+    # Entity relationship queries
+    entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!
+
+    # Events
+    events(before: String, after: String, limit: Int, offset: Int): [Event!]!
   }
 
   type Mutation {
@@ -42,6 +51,22 @@ export const typeDefs = `#graphql
     addEntityAttribute(entityId: ID!, input: AddEntityAttributeInput!): EntityAttribute!
     updateEntityAttribute(id: ID!, input: UpdateEntityAttributeInput!): EntityAttribute!
     deleteEntityAttribute(id: ID!): Boolean!
+
+    # Entity-Annotation linking mutations
+    linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
+
+    # Presence mutations
+    createPresence(input: CreatePresenceInput!): Presence!
+
+    # Entity relationship mutations
+    createEntityLink(input: CreateEntityLinkInput!): EntityLink!
+    deleteEntityLink(id: ID!): Boolean!
+
+    # Events
+    createEvent(input: CreateEventInput!): Event!
+    updateEvent(id: ID!, input: UpdateEventInput!): Event!
+    deleteEvent(id: ID!): Boolean!
   }
 
   type AuthPayload {
@@ -163,6 +188,7 @@ export const typeDefs = `#graphql
     id: ID!
     annotationId: ID!
     entityId: ID!
+    entity: Entity
     relationType: String
     confidence: Float
     notes: String
@@ -215,6 +241,99 @@ export const typeDefs = `#graphql
     confidence: Float
     createdAt: String!
     updatedAt: String!
+  }
+
+  type EntityLink {
+    id: ID!
+    fromEntityId: ID!
+    toEntityId: ID!
+    fromEntity: Entity
+    toEntity: Entity
+    relationType: String!
+    confidence: Float
+    notes: String
+    createdAt: String
+    createdBy: ID
+    metadata: JSON
+  }
+
+  type Event {
+    id: ID!
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    createdBy: ID
+    createdAt: String
+    metadata: JSON
+  }
+
+  input CreateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    metadata: JSON
+  }
+
+  input UpdateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    metadata: JSON
+  }
+
+  input CreateEntityLinkInput {
+    fromEntityId: ID!
+    toEntityId: ID!
+    relationType: String!
+    confidence: Float
+    notes: String
+    metadata: JSON
+  }
+
+  type Presence {
+    id: ID!
+    observedAt: String!
+    observedBy: ID
+    sourceAssetId: ID
+    sourceAsset: Image
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    createdAt: String
+    entities: [PresenceEntity!]!
+  }
+
+  type PresenceEntity {
+    presenceId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceInput {
+    observedAt: String!
+    sourceAssetId: ID
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    entities: [CreatePresenceEntityInput!]!
   }
 
   input CreateEntityInput {
