@@ -90,6 +90,23 @@ const DELETE_ENTITY_ATTRIBUTE = gql`
   }
 `;
 
+const GET_PRESENCES_BY_ENTITY = gql`
+  query GetPresencesByEntity($entityId: ID!, $limit: Int, $offset: Int) {
+    presencesByEntity(entityId: $entityId, limit: $limit, offset: $offset) {
+      id
+      observedAt
+      latitude
+      longitude
+      notes
+      sourceType
+      sourceAsset {
+        id
+        filePath
+      }
+    }
+  }
+`;
+
 const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const isNewEntity = !entity;
   const canWrite = userRole === 'admin' || userRole === 'investigator';
@@ -121,6 +138,15 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
         setAttributes(data.entity.attributes || []);
       }
     }
+  });
+
+  const { data: presencesData } = useQuery(GET_PRESENCES_BY_ENTITY, {
+    variables: {
+      entityId: entity?.id,
+      limit: 50,
+      offset: 0
+    },
+    skip: isNewEntity
   });
 
   useEffect(() => {
@@ -379,6 +405,43 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
                       Add
                     </button>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isNewEntity && (
+            <div className="form-section">
+              <h3>Presences</h3>
+
+              {presencesData?.presencesByEntity?.length > 0 ? (
+                <div className="attributes-list">
+                  {presencesData.presencesByEntity.map((p) => (
+                    <div key={p.id} className="attribute-item">
+                      <div className="attribute-info">
+                        <div className="attribute-name">
+                          {p.observedAt ? new Date(p.observedAt).toLocaleString() : 'Unknown time'}
+                        </div>
+                        <div className="attribute-value">
+                          {p.latitude != null && p.longitude != null
+                            ? `${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}`
+                            : 'No GPS'}
+                        </div>
+                        <div className="attribute-meta">
+                          {p.sourceType ? `Source: ${p.sourceType}` : 'Source: unknown'}
+                        </div>
+                        {p.notes && (
+                          <div className="attribute-meta">
+                            Notes: {p.notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: '#888', fontSize: '14px' }}>
+                  No presences yet. Linking this entity to an annotation will create one.
                 </div>
               )}
             </div>

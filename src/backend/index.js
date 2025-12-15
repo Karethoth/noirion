@@ -9,6 +9,7 @@ import userResolvers from './src/graphql/resolvers/user.resolver.js';
 import imageResolvers from './src/graphql/resolvers/image.resolver.js';
 import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js';
 import entityResolvers from './src/graphql/resolvers/entity.resolver.js';
+import presenceResolvers from './src/graphql/resolvers/presence.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 import { getUserFromAuthHeader } from './src/utils/auth.js';
@@ -46,17 +47,21 @@ const resolvers = {
     ...userResolvers.Query,
     ...imageResolvers.Query,
     ...annotationResolvers.Query,
-    ...entityResolvers.Query
+    ...entityResolvers.Query,
+    ...presenceResolvers.Query
   },
   Mutation: {
     ...userResolvers.Mutation,
     ...imageResolvers.Mutation,
     ...annotationResolvers.Mutation,
-    ...entityResolvers.Mutation
+    ...entityResolvers.Mutation,
+    ...presenceResolvers.Mutation
   },
   Image: imageResolvers.Image,
   Annotation: annotationResolvers.Annotation,
-  Entity: entityResolvers.Entity
+  Entity: entityResolvers.Entity,
+  Presence: presenceResolvers.Presence,
+  PresenceEntity: presenceResolvers.PresenceEntity
 };
 
 async function startServer() {

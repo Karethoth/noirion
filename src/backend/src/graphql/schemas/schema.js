@@ -16,6 +16,9 @@ export const typeDefs = `#graphql
     entities(entityType: String, limit: Int, offset: Int): [Entity!]!
     entity(id: ID!): Entity
     searchEntities(query: String!, entityType: String, limit: Int): [Entity!]!
+
+    # Presence queries
+    presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
   }
 
   type Mutation {
@@ -46,6 +49,9 @@ export const typeDefs = `#graphql
     # Entity-Annotation linking mutations
     linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
     unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
+
+    # Presence mutations
+    createPresence(input: CreatePresenceInput!): Presence!
   }
 
   type AuthPayload {
@@ -220,6 +226,46 @@ export const typeDefs = `#graphql
     confidence: Float
     createdAt: String!
     updatedAt: String!
+  }
+
+  type Presence {
+    id: ID!
+    observedAt: String!
+    observedBy: ID
+    sourceAssetId: ID
+    sourceAsset: Image
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    createdAt: String
+    entities: [PresenceEntity!]!
+  }
+
+  type PresenceEntity {
+    presenceId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceInput {
+    observedAt: String!
+    sourceAssetId: ID
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    entities: [CreatePresenceEntityInput!]!
   }
 
   input CreateEntityInput {

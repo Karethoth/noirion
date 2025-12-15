@@ -71,7 +71,8 @@ const annotationResolvers = {
         {
           relationType: args.relationType,
           confidence: args.confidence,
-          notes: args.notes
+          notes: args.notes,
+          observedBy: context.userId
         }
       );
     },
