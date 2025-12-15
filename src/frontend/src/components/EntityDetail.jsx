@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { gql } from '@apollo/client';
-import { useMutation, useQuery } from '@apollo/client/react';
+import { useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
 import Notification from './Notification';
 import './EntityDetail.css';
 

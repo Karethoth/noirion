@@ -22,6 +22,9 @@ export const typeDefs = `#graphql
 
     # Entity relationship queries
     entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!
+
+    # Events
+    events(before: String, after: String, limit: Int, offset: Int): [Event!]!
   }
 
   type Mutation {
@@ -59,6 +62,11 @@ export const typeDefs = `#graphql
     # Entity relationship mutations
     createEntityLink(input: CreateEntityLinkInput!): EntityLink!
     deleteEntityLink(id: ID!): Boolean!
+
+    # Events
+    createEvent(input: CreateEventInput!): Event!
+    updateEvent(id: ID!, input: UpdateEventInput!): Event!
+    deleteEvent(id: ID!): Boolean!
   }
 
   type AuthPayload {
@@ -246,6 +254,36 @@ export const typeDefs = `#graphql
     notes: String
     createdAt: String
     createdBy: ID
+    metadata: JSON
+  }
+
+  type Event {
+    id: ID!
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    createdBy: ID
+    createdAt: String
+    metadata: JSON
+  }
+
+  input CreateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    metadata: JSON
+  }
+
+  input UpdateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
     metadata: JSON
   }
 

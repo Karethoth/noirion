@@ -1,6 +1,8 @@
 // Centralized logger utility for Noirion
 // Usage: await logger.log({ level, eventType, message, details, dbPool, userId })
 
+let warnedMissingDbPool = false;
+
 export const logger = {
   async log({
     level = 'info',
@@ -11,8 +13,11 @@ export const logger = {
     userId = null
   }) {
     if (!dbPool) {
-      // eslint-disable-next-line no-console
-      console.error('Logger: dbPool not provided. Log not written to DB.');
+      if (process.env.NODE_ENV !== 'test' && !warnedMissingDbPool) {
+        warnedMissingDbPool = true;
+        // eslint-disable-next-line no-console
+        console.error('Logger: dbPool not provided. Log not written to DB.');
+      }
       return;
     }
     try {

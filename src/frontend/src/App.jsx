@@ -5,6 +5,7 @@ import { createUploadLink } from './utils/uploadLink'
 import ImageMap from './components/ImageMap'
 import ImageUpload from './components/ImageUpload'
 import EntityManager from './components/EntityManager'
+import TimelineView from './components/TimelineView'
 import Login from './components/Login'
 import './App.css'
 
@@ -17,7 +18,18 @@ const client = new ApolloClient({
 
 function MainApp({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('map');
+  const [timeCursor, setTimeCursor] = useState(() => {
+    return localStorage.getItem('timeCursor') || null;
+  });
   const canWrite = user.role === 'admin' || user.role === 'investigator';
+
+  useEffect(() => {
+    if (timeCursor) {
+      localStorage.setItem('timeCursor', timeCursor);
+    } else {
+      localStorage.removeItem('timeCursor');
+    }
+  }, [timeCursor]);
 
   return (
     <div className="main-app">
@@ -35,6 +47,12 @@ function MainApp({ user, onLogout }) {
             onClick={() => setCurrentView('entities')}
           >
             👤 Entities
+          </button>
+          <button
+            className={`nav-tab ${currentView === 'timeline' ? 'active' : ''}`}
+            onClick={() => setCurrentView('timeline')}
+          >
+            📌 Events
           </button>
         </div>
         <div className="nav-actions">
@@ -60,11 +78,18 @@ function MainApp({ user, onLogout }) {
       <div className="content-container">
         {currentView === 'map' && (
           <div className="map-container">
-            <ImageMap key="image-map" userRole={user.role} />
+            <ImageMap key="image-map" userRole={user.role} timeCursor={timeCursor} />
           </div>
         )}
         {currentView === 'entities' && (
           <EntityManager userRole={user.role} />
+        )}
+        {currentView === 'timeline' && (
+          <TimelineView
+            userRole={user.role}
+            timeCursor={timeCursor}
+            onTimeCursorChange={setTimeCursor}
+          />
         )}
       </div>
     </div>
