@@ -1,8 +1,14 @@
 import jwt from 'jsonwebtoken';
+import { loadConfig } from './config.js';
 
-// Secret key for JWT - in production, this should be in environment variables
-const JWT_SECRET = process.env.JWT_SECRET || 'noirion-secret-key-change-in-production';
-const JWT_EXPIRES_IN = '7d'; // Token expires in 7 days
+let cachedJwtConfig = null;
+
+async function getJwtConfig() {
+  if (cachedJwtConfig) return cachedJwtConfig;
+  const cfg = await loadConfig();
+  cachedJwtConfig = cfg.jwt;
+  return cachedJwtConfig;
+}
 
 /**
  * Generate a JWT token for a user
@@ -17,7 +23,11 @@ export function generateToken(user) {
     role: user.role
   };
 
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  // Async config isn't ideal here, but keeps a single source of truth.
+  // We intentionally do a sync fallback if config isn't loaded yet.
+  const secret = cachedJwtConfig?.secret || process.env.JWT_SECRET || 'noirion-secret-key-change-in-production';
+  const expiresIn = cachedJwtConfig?.expiresIn || process.env.JWT_EXPIRES_IN || '7d';
+  return jwt.sign(payload, secret, { expiresIn });
 }
 
 /**
@@ -27,12 +37,16 @@ export function generateToken(user) {
  */
 export function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    const secret = cachedJwtConfig?.secret || process.env.JWT_SECRET || 'noirion-secret-key-change-in-production';
+    return jwt.verify(token, secret);
   } catch (error) {
     console.error('Token verification failed:', error.message);
     return null;
   }
 }
+
+// Warm config cache early (best effort)
+getJwtConfig().catch(() => {});
 
 /**
  * Extract user info from Authorization header

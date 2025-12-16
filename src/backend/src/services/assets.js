@@ -10,6 +10,76 @@ export class AssetsService {
     this.uploadDir = path.join(process.cwd(), 'uploads');
   }
 
+  async setAssetAiAnalysis(assetId, aiAnalysis) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query(
+        `UPDATE assets
+         SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{aiAnalysis}', $2::jsonb, true)
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [assetId, JSON.stringify(aiAnalysis || {})]
+      );
+      return await this.getAssetById(assetId);
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateAssetManualMetadata(
+    assetId,
+    { displayName, latitude, longitude, altitude, captureTimestamp } = {},
+    userId = null
+  ) {
+    const client = await this.dbPool.connect();
+    try {
+      // Validate coordinates if provided
+      const hasLat = latitude !== undefined && latitude !== null && latitude !== '';
+      const hasLng = longitude !== undefined && longitude !== null && longitude !== '';
+      if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
+        throw new Error('Both latitude and longitude must be provided together');
+      }
+
+      const displayNameNorm = displayName === '' ? null : displayName;
+      const altitudeNorm = altitude === '' ? null : altitude;
+      const captureNorm = captureTimestamp === '' ? null : captureTimestamp;
+
+      const params = [assetId, displayNameNorm, altitudeNorm, captureNorm, userId];
+      let gpsSql = 'NULL';
+      if (hasLat && hasLng) {
+        params.push(Number(longitude));
+        params.push(Number(latitude));
+        gpsSql = 'ST_SetSRID(ST_MakePoint($6, $7), 4326)';
+      }
+
+      await client.query(
+        `INSERT INTO asset_metadata_manual (
+          asset_id,
+          display_name,
+          altitude,
+          capture_timestamp,
+          gps,
+          created_by,
+          updated_by,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, ${gpsSql}, $5, $5, now()
+        )
+        ON CONFLICT (asset_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          altitude = EXCLUDED.altitude,
+          capture_timestamp = EXCLUDED.capture_timestamp,
+          gps = EXCLUDED.gps,
+          updated_by = EXCLUDED.updated_by,
+          updated_at = now()`,
+        params
+      );
+
+      return await this.getAssetById(assetId);
+    } finally {
+      client.release();
+    }
+  }
+
   async ensureUploadDir() {
     try {
       await fs.access(this.uploadDir);
@@ -256,9 +326,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.sha256 = $1 AND a.deleted_at IS NULL
       `, [hash]);
       return result.rows[0] ? this.formatAssetResult(result.rows[0]) : null;
@@ -279,9 +354,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.deleted_at IS NULL
         AND a.content_type LIKE 'image/%'
         ORDER BY a.uploaded_at DESC
@@ -304,9 +384,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.id = $1 AND a.deleted_at IS NULL
       `, [id]);
       return result.rows[0] ? this.formatAssetResult(result.rows[0]) : null;
@@ -328,14 +413,19 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
-        JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.deleted_at IS NULL
         AND a.content_type LIKE 'image/%'
-        AND e.gps IS NOT NULL
+        AND COALESCE(m.gps, e.gps) IS NOT NULL
         AND ST_Within(
-          e.gps,
+          COALESCE(m.gps, e.gps),
           ST_MakeEnvelope($1, $2, $3, $4, 4326)
         )
         ORDER BY a.uploaded_at DESC
@@ -372,6 +462,12 @@ export class AssetsService {
         [id]
       );
 
+      // Delete manual metadata
+      await client.query(
+        `DELETE FROM asset_metadata_manual WHERE asset_id = $1`,
+        [id]
+      );
+
       // Finally delete the asset itself
       const result = await client.query(
         `DELETE FROM assets WHERE id = $1 RETURNING id`,
@@ -389,10 +485,12 @@ export class AssetsService {
   }
 
   formatAssetResult(row) {
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     return {
       id: row.id,
       filename: row.filename,
       originalName: row.filename, // assets table doesn't store original name separately
+      displayName: row.manual_display_name || row.filename,
       filePath: row.storage_path,
       sha256Hash: row.sha256,
       fileSize: parseInt(row.size_bytes),
@@ -401,7 +499,9 @@ export class AssetsService {
       height: row.height,
       latitude: row.latitude,
       longitude: row.longitude,
-      altitude: row.altitude ? parseFloat(row.altitude) : null,
+      altitude: (row.manual_altitude ?? row.altitude) !== null && (row.manual_altitude ?? row.altitude) !== undefined
+        ? parseFloat(row.manual_altitude ?? row.altitude)
+        : null,
       orientation: row.orientation,
 
       // Camera information
@@ -430,7 +530,9 @@ export class AssetsService {
       whiteBalance: row.white_balance,
 
       // Timestamps
-      captureTimestamp: row.capture_timestamp?.toISOString(),
+      captureTimestamp: (row.manual_capture_timestamp || row.capture_timestamp)
+        ? new Date(row.manual_capture_timestamp || row.capture_timestamp).toISOString()
+        : null,
       uploadedAt: row.uploaded_at?.toISOString(),
       uploadedBy: row.uploader_id,
 
@@ -441,7 +543,8 @@ export class AssetsService {
 
       // Full EXIF data for advanced use
       exifData: row.exif_raw || {},
-      metadata: row.metadata || {}
+      metadata: metadata,
+      aiAnalysis: metadata.aiAnalysis || null
     };
   }
 }

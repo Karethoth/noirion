@@ -5,6 +5,7 @@ export const GET_IMAGES = gql`
     images {
       id
       filename
+      displayName
       filePath
       fileSize
       latitude
@@ -13,10 +14,78 @@ export const GET_IMAGES = gql`
       cameraMake
       cameraModel
       uploadedAt
+      aiAnalysis {
+        caption
+        licensePlates
+        model
+        createdAt
+      }
       annotations {
         id
         tags
       }
+    }
+  }
+`;
+
+export const GET_IMAGE = gql`
+  query GetImage($id: ID!) {
+    image(id: $id) {
+      id
+      filename
+      displayName
+      filePath
+      fileSize
+      mimeType
+      width
+      height
+      latitude
+      longitude
+      altitude
+      captureTimestamp
+      uploadedAt
+      cameraMake
+      cameraModel
+      aiAnalysis {
+        caption
+        licensePlates
+        model
+        createdAt
+      }
+    }
+  }
+`;
+
+export const UPDATE_IMAGE = gql`
+  mutation UpdateImage($id: ID!, $input: UpdateImageInput!) {
+    updateImage(id: $id, input: $input) {
+      id
+      filename
+      displayName
+      filePath
+      fileSize
+      latitude
+      longitude
+      altitude
+      captureTimestamp
+      uploadedAt
+      aiAnalysis {
+        caption
+        licensePlates
+        model
+        createdAt
+      }
+    }
+  }
+`;
+
+export const ANALYZE_IMAGE = gql`
+  mutation AnalyzeImage($id: ID!, $model: String, $persist: Boolean = true) {
+    analyzeImage(id: $id, model: $model, persist: $persist) {
+      caption
+      licensePlates
+      model
+      createdAt
     }
   }
 `;

@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import AnnotationViewer from './AnnotationViewer';
 import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
+import { ANALYZE_IMAGE } from '../graphql/images';
 import {
   GET_ANNOTATIONS,
   CREATE_ANNOTATION as ADD_ANNOTATION,
@@ -11,7 +12,7 @@ import {
 } from '../graphql/annotations';
 
 
-const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
+const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = null }) => {
   const { data, refetch } = useQuery(GET_ANNOTATIONS, {
     variables: { assetId: image?.id },
     skip: !image,
@@ -22,6 +23,9 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
   const [deleteAnnotation] = useMutation(DELETE_ANNOTATION);
   const [updateAnnotation] = useMutation(UPDATE_ANNOTATION);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeImage] = useMutation(ANALYZE_IMAGE);
 
   // When annotations change, select the first by default if none selected
   useEffect(() => {
@@ -32,6 +36,29 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
       setSelectedAnnotationId(null);
     }
   }, [data, selectedAnnotationId]);
+
+  useEffect(() => {
+    setAiAnalysis(image?.aiAnalysis || null);
+  }, [image]);
+
+  const handleAnalyze = useCallback(async () => {
+    if (!image?.id) return;
+    setAnalyzing(true);
+    try {
+      const res = await analyzeImage({
+        variables: {
+          id: image.id,
+          persist: true,
+        },
+      });
+      setAiAnalysis(res?.data?.analyzeImage || null);
+    } catch (err) {
+      console.error('Analyze image error:', err);
+      alert(`Analyze failed: ${err.message}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [analyzeImage, image]);
 
   // Delete annotation handler
   const handleAnnotationDelete = useCallback(async (annotationId) => {
@@ -159,6 +186,46 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
           overflowY: 'auto'
         }}>
           <h3 style={{ margin: '0 0 10px 0', color: '#e0e0e0' }}>{image.filename}</h3>
+          {!readOnly && (
+            <div style={{ marginBottom: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button
+                onClick={handleAnalyze}
+                disabled={analyzing}
+                style={{
+                  padding: '6px 10px',
+                  background: analyzing ? '#6c757d' : 'rgba(0, 123, 255, 0.9)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  cursor: analyzing ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {analyzing ? '⏳ Analyzing...' : '🧠 Analyze (LM Studio)'}
+              </button>
+              <button
+                onClick={() => {
+                  if (typeof onEditDetails === 'function' && image?.id) onEditDetails(image.id);
+                }}
+                style={{
+                  padding: '6px 10px',
+                  background: 'rgba(23, 162, 184, 0.9)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✏️ Edit details
+              </button>
+              {aiAnalysis?.createdAt && (
+                <div style={{ color: '#b0b0b0', fontSize: '12px' }}>
+                  {new Date(aiAnalysis.createdAt).toLocaleString()}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
               {image.captureTimestamp && (
@@ -167,6 +234,16 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {
               <div><strong>Uploaded:</strong> {new Date(image.uploadedAt).toLocaleString()}</div>
               {image.cameraMake && image.cameraModel && (
                 <div><strong>Camera:</strong> {image.cameraMake} {image.cameraModel}</div>
+              )}
+              {aiAnalysis?.caption && (
+                <div style={{ marginTop: '8px' }}>
+                  <strong>AI Caption:</strong> {aiAnalysis.caption}
+                </div>
+              )}
+              {aiAnalysis?.licensePlates?.length > 0 && (
+                <div style={{ marginTop: '6px' }}>
+                  <strong>AI Plates:</strong> {aiAnalysis.licensePlates.join(', ')}
+                </div>
               )}
             </div>
             <div>

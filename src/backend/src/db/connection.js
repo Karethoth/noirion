@@ -1,19 +1,20 @@
 import { Pool } from 'pg';
 import 'dotenv/config';
+import { getConfig } from '../utils/config.js';
 
-const dbConfig = {
-  user: process.env.POSTGRES_USER || 'noirion',
-  host: process.env.POSTGRES_HOST || 'localhost',
-  database: process.env.POSTGRES_DB || 'noirion',
-  password: process.env.POSTGRES_PASSWORD || 'secret',
-  port: process.env.POSTGRES_PORT || 5432,
-};
+let pool;
 
-const pool = new Pool(dbConfig);
+async function ensurePool() {
+  if (pool) return pool;
+  const cfg = await getConfig();
+  pool = new Pool(cfg.db);
+  return pool;
+}
 
 async function testConnection() {
   try {
-    const client = await pool.connect();
+    const p = await ensurePool();
+    const client = await p.connect();
     console.log('Successfully connected to PostgreSQL database');
     client.release();
     return true;
@@ -23,4 +24,21 @@ async function testConnection() {
   }
 }
 
-export { pool, testConnection };
+// Export a proxy-like pool API used across the app.
+const poolProxy = {
+  connect: async () => {
+    const p = await ensurePool();
+    return await p.connect();
+  },
+  query: async (text, params) => {
+    const p = await ensurePool();
+    return await p.query(text, params);
+  },
+  end: async () => {
+    if (!pool) return;
+    await pool.end();
+    pool = null;
+  }
+};
+
+export { poolProxy as pool, testConnection };

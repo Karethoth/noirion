@@ -23,7 +23,15 @@ vi.mock('react-leaflet', () => {
   const TileLayer = () => <div data-testid="tile" />;
   const Marker = () => <div data-testid="marker" />;
   const useMapEvents = () => ({ });
-  return { MapContainer, TileLayer, Marker, useMapEvents };
+  const useMap = () => ({
+    getContainer: () => ({
+      classList: {
+        add: () => {},
+        remove: () => {},
+      }
+    })
+  });
+  return { MapContainer, TileLayer, Marker, useMapEvents, useMap };
 });
 
 async function loadTimelineModule() {
@@ -38,14 +46,14 @@ function renderWithApollo(ui, mocks) {
   );
 }
 
-describe('TimelineView (Events)', () => {
+describe('TimelineView (Timeline)', () => {
   test('renders events list from query', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS } = await loadTimelineModule();
+    const { default: TimelineView, GET_EVENTS, GET_PRESENCES } = await loadTimelineModule();
 
     const mocks = [
       {
-        request: { query: GET_EVENTS, variables: { before: '2025-02-01T00:00:00.000Z' } },
+        request: { query: GET_EVENTS, variables: { before: '2025-02-01T00:00:00.000Z', after: null } },
         result: {
           data: {
             events: [
@@ -55,20 +63,33 @@ describe('TimelineView (Events)', () => {
                 latitude: null,
                 longitude: null,
                 title: 'Alpha',
-                description: 'First'
+                description: 'First',
+                entities: []
               }
             ]
           }
         }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before: '2025-02-01T00:00:00.000Z', after: null } },
+        result: { data: { presences: [] } }
       }
     ];
 
     renderWithApollo(
-      <TimelineView userRole="investigator" timeCursor="2025-02-01T00:00:00.000Z" onTimeCursorChange={() => {}} />,
+      <TimelineView
+        userRole="investigator"
+        timeCursor="2025-02-01T00:00:00.000Z"
+        onTimeCursorChange={() => {}}
+        timeStart={null}
+        onTimeStartChange={() => {}}
+        ignoreTimeFilter={{ events: false, presences: false, images: false }}
+        onIgnoreTimeFilterChange={() => {}}
+      />,
       mocks
     );
 
-    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(await screen.findByText('Event: Alpha')).toBeInTheDocument();
     expect(screen.getByText('First')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
@@ -79,22 +100,42 @@ describe('TimelineView (Events)', () => {
 
   test('create validation: title required', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS } = await loadTimelineModule();
+    const { default: TimelineView, GET_EVENTS, GET_PRESENCES } = await loadTimelineModule();
 
     const mocks = [
       {
-        request: { query: GET_EVENTS, variables: { before: '2025-02-01T00:00:00.000Z' } },
+        request: { query: GET_EVENTS, variables: { before: '2025-02-01T00:00:00.000Z', after: null } },
         result: { data: { events: [] } }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before: '2025-02-01T00:00:00.000Z', after: null } },
+        result: { data: { presences: [] } }
       }
     ];
 
     renderWithApollo(
-      <TimelineView userRole="investigator" timeCursor="2025-02-01T00:00:00.000Z" onTimeCursorChange={() => {}} />,
+      <TimelineView
+        userRole="investigator"
+        timeCursor="2025-02-01T00:00:00.000Z"
+        onTimeCursorChange={() => {}}
+        timeStart={null}
+        onTimeStartChange={() => {}}
+        ignoreTimeFilter={{ events: false, presences: false, images: false }}
+        onIgnoreTimeFilterChange={() => {}}
+      />,
       mocks
     );
 
     // Wait for initial query to settle
-    await screen.findByRole('heading', { name: 'Events', level: 2 });
+    await screen.findByRole('heading', { name: 'Timeline', level: 2 });
+
+    await user.click(screen.getByRole('button', { name: 'Create event…' }));
+
+    // Location picker is opened via modal
+    await user.click(screen.getByRole('button', { name: 'Set place…' }));
+    expect(await screen.findByText('Set event location')).toBeInTheDocument();
+    expect(screen.getByTestId('map')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Close'));
 
     await user.click(screen.getByRole('button', { name: 'Create' }));
     expect(await screen.findByText('Title is required')).toBeInTheDocument();
@@ -102,14 +143,18 @@ describe('TimelineView (Events)', () => {
 
   test('creates event (location optional) and shows success notification', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, CREATE_EVENT } = await loadTimelineModule();
+    const { default: TimelineView, GET_EVENTS, CREATE_EVENT, GET_PRESENCES } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const occurredAtIso = new Date('2025-01-01T10:20').toISOString();
     const mocks = [
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: { data: { events: [] } }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
       },
       {
         request: {
@@ -120,22 +165,37 @@ describe('TimelineView (Events)', () => {
               latitude: null,
               longitude: null,
               title: 'New Event',
-              description: null
+              description: null,
+              entities: []
             }
           }
         },
-        result: { data: { createEvent: { id: 'new1' } } }
+        result: { data: { createEvent: { id: 'new1', entities: [] } } }
       },
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: { data: { events: [] } }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
       }
     ];
 
     renderWithApollo(
-      <TimelineView userRole="investigator" timeCursor={before} onTimeCursorChange={() => {}} />,
+      <TimelineView
+        userRole="investigator"
+        timeCursor={before}
+        onTimeCursorChange={() => {}}
+        timeStart={null}
+        onTimeStartChange={() => {}}
+        ignoreTimeFilter={{ events: false, presences: false, images: false }}
+        onIgnoreTimeFilterChange={() => {}}
+      />,
       mocks
     );
+
+    await user.click(await screen.findByRole('button', { name: 'Create event…' }));
 
     // Fill create form
     await screen.findByText('Create Event');
@@ -150,12 +210,12 @@ describe('TimelineView (Events)', () => {
 
   test('edits an event and saves via update mutation', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, UPDATE_EVENT } = await loadTimelineModule();
+    const { default: TimelineView, GET_EVENTS, UPDATE_EVENT, GET_PRESENCES } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const mocks = [
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: {
           data: {
             events: [
@@ -165,11 +225,16 @@ describe('TimelineView (Events)', () => {
                 latitude: null,
                 longitude: null,
                 title: 'Alpha',
-                description: null
+                description: null,
+                entities: []
               }
             ]
           }
         }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
       },
       {
         request: {
@@ -181,7 +246,8 @@ describe('TimelineView (Events)', () => {
               latitude: null,
               longitude: null,
               title: 'Alpha Edited',
-              description: null
+              description: null,
+              entities: []
             }
           }
         },
@@ -193,23 +259,36 @@ describe('TimelineView (Events)', () => {
               latitude: null,
               longitude: null,
               title: 'Alpha Edited',
-              description: null
+              description: null,
+              entities: []
             }
           }
         }
       },
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: { data: { events: [] } }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
       }
     ];
 
     renderWithApollo(
-      <TimelineView userRole="investigator" timeCursor={before} onTimeCursorChange={() => {}} />,
+      <TimelineView
+        userRole="investigator"
+        timeCursor={before}
+        onTimeCursorChange={() => {}}
+        timeStart={null}
+        onTimeStartChange={() => {}}
+        ignoreTimeFilter={{ events: false, presences: false, images: false }}
+        onIgnoreTimeFilterChange={() => {}}
+      />,
       mocks
     );
 
-    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(await screen.findByText('Event: Alpha')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     expect(await screen.findByText('Edit Event')).toBeInTheDocument();
@@ -229,12 +308,12 @@ describe('TimelineView (Events)', () => {
   test('deletes an event after confirmation', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, DELETE_EVENT } = await loadTimelineModule();
+    const { default: TimelineView, GET_EVENTS, DELETE_EVENT, GET_PRESENCES } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const mocks = [
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: {
           data: {
             events: [
@@ -244,28 +323,45 @@ describe('TimelineView (Events)', () => {
                 latitude: null,
                 longitude: null,
                 title: 'Alpha',
-                description: null
+                description: null,
+                entities: []
               }
             ]
           }
         }
       },
       {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
+      },
+      {
         request: { query: DELETE_EVENT, variables: { id: 'e1' } },
         result: { data: { deleteEvent: true } }
       },
       {
-        request: { query: GET_EVENTS, variables: { before } },
+        request: { query: GET_EVENTS, variables: { before, after: null } },
         result: { data: { events: [] } }
+      },
+      {
+        request: { query: GET_PRESENCES, variables: { before, after: null } },
+        result: { data: { presences: [] } }
       }
     ];
 
     renderWithApollo(
-      <TimelineView userRole="investigator" timeCursor={before} onTimeCursorChange={() => {}} />,
+      <TimelineView
+        userRole="investigator"
+        timeCursor={before}
+        onTimeCursorChange={() => {}}
+        timeStart={null}
+        onTimeStartChange={() => {}}
+        ignoreTimeFilter={{ events: false, presences: false, images: false }}
+        onIgnoreTimeFilterChange={() => {}}
+      />,
       mocks
     );
 
-    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(await screen.findByText('Event: Alpha')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Event deleted')).toBeInTheDocument();
 

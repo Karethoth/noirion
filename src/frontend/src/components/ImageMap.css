@@ -497,6 +497,32 @@
   border: none;
 }
 
+/* Presence connection lines */
+.presence-path {
+  stroke: #10b981;
+}
+
+/* Temporary marker for edit-mode click placement */
+.custom-draft-marker {
+  background: transparent;
+  border: none;
+}
+
+.draft-marker-inner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(220, 53, 69, 0.95);
+  background: rgba(220, 53, 69, 0.15);
+  color: rgba(220, 53, 69, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
 .presence-marker-inner,
 .location-marker-inner {
   width: 28px;

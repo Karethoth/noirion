@@ -12,6 +12,7 @@ import entityResolvers from './src/graphql/resolvers/entity.resolver.js';
 import presenceResolvers from './src/graphql/resolvers/presence.resolver.js';
 import entityLinkResolvers from './src/graphql/resolvers/entity-link.resolver.js';
 import eventResolvers from './src/graphql/resolvers/event.resolver.js';
+import projectSettingsResolvers from './src/graphql/resolvers/project-settings.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 import { getUserFromAuthHeader } from './src/utils/auth.js';
@@ -52,7 +53,8 @@ const resolvers = {
     ...entityResolvers.Query,
     ...presenceResolvers.Query,
     ...entityLinkResolvers.Query,
-    ...eventResolvers.Query
+    ...eventResolvers.Query,
+    ...projectSettingsResolvers.Query
   },
   Mutation: {
     ...userResolvers.Mutation,
@@ -61,14 +63,17 @@ const resolvers = {
     ...entityResolvers.Mutation,
     ...presenceResolvers.Mutation,
     ...entityLinkResolvers.Mutation,
-    ...eventResolvers.Mutation
+    ...eventResolvers.Mutation,
+    ...projectSettingsResolvers.Mutation
   },
   Image: imageResolvers.Image,
   Annotation: annotationResolvers.Annotation,
   Entity: entityResolvers.Entity,
   Presence: presenceResolvers.Presence,
   PresenceEntity: presenceResolvers.PresenceEntity,
-  EntityLink: entityLinkResolvers.EntityLink
+  EntityLink: entityLinkResolvers.EntityLink,
+  Event: eventResolvers.Event,
+  EventEntity: eventResolvers.EventEntity
 };
 
 async function startServer() {

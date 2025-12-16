@@ -4,7 +4,9 @@ import './AnnotationViewer.css';
 import {
   SEARCH_ENTITIES_BY_TAG,
   LINK_ENTITY_TO_ANNOTATION,
-  UNLINK_ENTITY_FROM_ANNOTATION
+  UNLINK_ENTITY_FROM_ANNOTATION,
+  ANALYZE_ANNOTATION,
+  ANALYZE_ANNOTATION_DRAFT
 } from '../graphql/annotations';
 
 const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId, onRefetch }) => {
@@ -29,6 +31,8 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [entitySuggestions, setEntitySuggestions] = useState([]);
   const [pendingAnnotationData, setPendingAnnotationData] = useState(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
 
   // Zoom and pan state
   const [scale, setScale] = useState(1);
@@ -58,6 +62,109 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       }
     }
   });
+
+  const [analyzeAnnotation] = useMutation(ANALYZE_ANNOTATION);
+  const [analyzeAnnotationDraft] = useMutation(ANALYZE_ANNOTATION_DRAFT);
+
+  const formatAiSuggestionIntoDescription = useCallback((currentText, analysis) => {
+    const base = (currentText || '').trim();
+    const lines = base ? [base] : [];
+
+    if (analysis?.caption) {
+      lines.push(analysis.caption.trim());
+    }
+
+    const tagTokens = [];
+
+    if (Array.isArray(analysis?.tags)) {
+      for (const t of analysis.tags) {
+        if (typeof t !== 'string') continue;
+        const cleaned = t.trim();
+        if (!cleaned) continue;
+        tagTokens.push(`#${cleaned.replace(/^#/, '')}`);
+      }
+    }
+
+    if (Array.isArray(analysis?.licensePlates)) {
+      for (const p of analysis.licensePlates) {
+        if (typeof p !== 'string') continue;
+        const cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+        if (!cleaned) continue;
+        tagTokens.push(`#license_plate:${cleaned}`);
+      }
+    }
+
+    if (tagTokens.length > 0) {
+      lines.push(tagTokens.join(' '));
+    }
+
+    return lines.join('\n').trim();
+  }, []);
+
+  const handleAnalyzeSelectedAnnotation = useCallback(async () => {
+    if (!selectedRegion) return;
+    const regionId = selectedRegion?.regions?.[0]?.id || null;
+
+    setAiAnalyzing(true);
+    setAiResult(null);
+    try {
+      const resp = await analyzeAnnotation({
+        variables: {
+          annotationId: selectedRegion.id,
+          regionId,
+          persist: false,
+        },
+      });
+
+      const analysis = resp?.data?.analyzeAnnotation || null;
+      setAiResult(analysis);
+
+      if (!readOnly && analysis) {
+        const newText = formatAiSuggestionIntoDescription(editingDescription ? editDescValue : (selectedRegion.description || ''), analysis);
+        setEditDescValue(newText);
+        setEditingDescription(true);
+      }
+    } catch (error) {
+      console.error('Analyze annotation failed:', error);
+      alert('Failed to analyze annotation');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [selectedRegion, analyzeAnnotation, readOnly, editingDescription, editDescValue, formatAiSuggestionIntoDescription]);
+
+  const handleAnalyzeDraftAnnotation = useCallback(async () => {
+    if (!pendingRegion) return;
+    if (!image?.id) return;
+
+    setAiAnalyzing(true);
+    setAiResult(null);
+    try {
+      const resp = await analyzeAnnotationDraft({
+        variables: {
+          assetId: image.id,
+          input: {
+            shapeType: pendingRegion.shapeType,
+            coordinates: pendingRegion.coordinates,
+            style: pendingRegion.style,
+          },
+          model: null,
+        },
+      });
+
+      const analysis = resp?.data?.analyzeAnnotationDraft || null;
+      setAiResult(analysis);
+
+      if (!readOnly && analysis) {
+        const newText = formatAiSuggestionIntoDescription(description, analysis);
+        setDescription(newText);
+      }
+    } catch (error) {
+      console.error('Analyze draft annotation failed:', error);
+      alert('Failed to analyze annotation');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [pendingRegion, image?.id, analyzeAnnotationDraft, readOnly, description, formatAiSuggestionIntoDescription]);
 
   const handleUnlinkEntity = async (linkId) => {
     try {
@@ -495,6 +602,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       if (!stillExists) {
         _setSelectedRegion(null);
         setEditingDescription(false);
+        setAiResult(null);
       }
     }
   }, [annotations, selectedRegion]);
@@ -865,6 +973,15 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                   />
                 </label>
               </div>
+              <button
+                type="button"
+                onClick={handleAnalyzeDraftAnnotation}
+                disabled={aiAnalyzing}
+                style={{ marginRight: 8 }}
+                title="Analyze the drawn region using LM Studio (does not save the annotation)"
+              >
+                {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+              </button>
               <button type="submit">Save Annotation</button>
               <button type="button" style={{ marginLeft: 8 }} onClick={() => { setPendingRegion(null); setDescription(''); }}>Cancel</button>
             </form>
@@ -1006,12 +1123,28 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               <button onClick={handleEditAnnotationSave}>
                 Save
               </button>
+              <button
+                style={{ marginLeft: 8 }}
+                onClick={handleAnalyzeSelectedAnnotation}
+                disabled={aiAnalyzing}
+                title="Analyze selected annotation region using LM Studio"
+              >
+                {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+              </button>
               <button style={{ marginLeft: 8 }} onClick={() => {
                 setEditingDescription(false);
               }}>
                 Cancel
               </button>
             </div>
+            {aiResult && (
+              <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
+                <div><strong>AI caption:</strong> {aiResult.caption || '(none)'}</div>
+                {aiResult.licensePlates?.length > 0 && (
+                  <div><strong>Plates:</strong> {aiResult.licensePlates.join(', ')}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1109,6 +1242,24 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             {!readOnly && (
               <div className="annotation-details-actions">
                 <button
+                  onClick={handleAnalyzeSelectedAnnotation}
+                  disabled={aiAnalyzing}
+                  title="Analyze selected annotation region using LM Studio"
+                  style={{
+                    backgroundColor: '#2a5a8a',
+                    color: 'white',
+                    border: 'none',
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    marginRight: 8
+                  }}
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+                <button
                   onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}
                   style={{
                     backgroundColor: '#dc3545',
@@ -1125,6 +1276,30 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                 >
                   Delete Annotation
                 </button>
+              </div>
+            )}
+
+            {readOnly && (
+              <div className="annotation-details-actions">
+                <button
+                  onClick={handleAnalyzeSelectedAnnotation}
+                  disabled={aiAnalyzing}
+                  title="Analyze selected annotation region using LM Studio"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+              </div>
+            )}
+
+            {aiResult && readOnly && (
+              <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
+                <div><strong>AI caption:</strong> {aiResult.caption || '(none)'}</div>
+                {aiResult.tags?.length > 0 && (
+                  <div><strong>Tags:</strong> {aiResult.tags.join(', ')}</div>
+                )}
+                {aiResult.licensePlates?.length > 0 && (
+                  <div><strong>Plates:</strong> {aiResult.licensePlates.join(', ')}</div>
+                )}
               </div>
             )}
           </div>

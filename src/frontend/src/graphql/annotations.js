@@ -117,3 +117,27 @@ export const SEARCH_ENTITIES_BY_TAG = gql`
     }
   }
 `;
+
+export const ANALYZE_ANNOTATION = gql`
+  mutation AnalyzeAnnotation($annotationId: ID!, $regionId: ID, $model: String, $persist: Boolean) {
+    analyzeAnnotation(annotationId: $annotationId, regionId: $regionId, model: $model, persist: $persist) {
+      caption
+      tags
+      licensePlates
+      model
+      createdAt
+    }
+  }
+`;
+
+export const ANALYZE_ANNOTATION_DRAFT = gql`
+  mutation AnalyzeAnnotationDraft($assetId: ID!, $input: AddRegionInput!, $model: String) {
+    analyzeAnnotationDraft(assetId: $assetId, input: $input, model: $model) {
+      caption
+      tags
+      licensePlates
+      model
+      createdAt
+    }
+  }
+`;

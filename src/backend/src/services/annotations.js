@@ -5,6 +5,30 @@ export class AnnotationService {
     this.dbPool = dbPool;
   }
 
+  async setAnnotationAiAnalysis(annotationId, aiAnalysis) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query(
+        `
+          UPDATE annotations
+          SET metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{aiAnalysis}',
+            $2::jsonb,
+            true
+          ),
+          updated_at = NOW()
+          WHERE id = $1
+        `,
+        [annotationId, JSON.stringify(aiAnalysis || {})]
+      );
+
+      return await this.getAnnotationById(annotationId);
+    } finally {
+      client.release();
+    }
+  }
+
   async createAnnotation(assetId, createdBy, { title, description, tags, metadata }) {
     const client = await this.dbPool.connect();
     try {

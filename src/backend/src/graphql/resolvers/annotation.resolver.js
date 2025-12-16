@@ -1,5 +1,6 @@
 import { AnnotationService } from '../../services/annotations.js';
 import { AssetsService } from '../../services/assets.js';
+import { ImageAnalysisService } from '../../services/image-analysis.js';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
 
 const annotationResolvers = {
@@ -81,6 +82,31 @@ const annotationResolvers = {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.unlinkEntityFromAnnotation(args.linkId);
+    },
+
+    analyzeAnnotation: async (parent, args, context) => {
+      const persist = args.persist !== false;
+      requirePermission(context.user, persist ? 'write' : 'read');
+
+      const analysisService = new ImageAnalysisService(context.dbPool);
+      return await analysisService.analyzeAnnotationById(args.annotationId, {
+        regionId: args.regionId || null,
+        model: args.model || null,
+        persist,
+        userId: context.userId,
+      });
+    },
+
+    analyzeAnnotationDraft: async (parent, args, context) => {
+      requirePermission(context.user, 'read');
+
+      const analysisService = new ImageAnalysisService(context.dbPool);
+      return await analysisService.analyzeAnnotationDraft(args.assetId, {
+        shapeType: args.input?.shapeType,
+        coordinates: args.input?.coordinates,
+        model: args.model || null,
+        userId: context.userId,
+      });
     }
   },
 
@@ -98,6 +124,10 @@ const annotationResolvers = {
     entityLinks: async (parent, args, context) => {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getEntityLinksByAnnotationId(parent.id);
+    },
+
+    aiAnalysis: async (parent) => {
+      return parent?.metadata?.aiAnalysis || null;
     }
   },
 

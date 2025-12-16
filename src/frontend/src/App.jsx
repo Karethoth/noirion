@@ -4,8 +4,11 @@ import { ApolloProvider } from '@apollo/client/react'
 import { createUploadLink } from './utils/uploadLink'
 import ImageMap from './components/ImageMap'
 import ImageUpload from './components/ImageUpload'
+import AssetEditor from './components/AssetEditor'
+import AssetList from './components/AssetList'
 import EntityManager from './components/EntityManager'
 import TimelineView from './components/TimelineView'
+import Settings from './components/Settings'
 import Login from './components/Login'
 import './App.css'
 
@@ -18,18 +21,51 @@ const client = new ApolloClient({
 
 function MainApp({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('map');
+  const [assetEditorId, setAssetEditorId] = useState(null);
+  const [assetEditorReturnView, setAssetEditorReturnView] = useState('map');
+  const [timeStart, setTimeStart] = useState(() => {
+    return localStorage.getItem('timeStart') || null;
+  });
   const [timeCursor, setTimeCursor] = useState(() => {
     return localStorage.getItem('timeCursor') || null;
+  });
+  const [ignoreTimeFilter, setIgnoreTimeFilter] = useState(() => {
+    try {
+      const raw = localStorage.getItem('ignoreTimeFilter');
+      if (!raw) return { events: false, presences: false, images: false };
+      const parsed = JSON.parse(raw);
+      return {
+        events: !!parsed?.events,
+        presences: !!parsed?.presences,
+        images: !!parsed?.images,
+      };
+    } catch {
+      return { events: false, presences: false, images: false };
+    }
   });
   const canWrite = user.role === 'admin' || user.role === 'investigator';
 
   useEffect(() => {
+    if (timeStart) {
+      localStorage.setItem('timeStart', timeStart);
+    } else {
+      localStorage.removeItem('timeStart');
+    }
+
     if (timeCursor) {
       localStorage.setItem('timeCursor', timeCursor);
     } else {
       localStorage.removeItem('timeCursor');
     }
-  }, [timeCursor]);
+  }, [timeStart, timeCursor]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ignoreTimeFilter', JSON.stringify(ignoreTimeFilter));
+    } catch {
+      // ignore
+    }
+  }, [ignoreTimeFilter]);
 
   return (
     <div className="main-app">
@@ -52,7 +88,19 @@ function MainApp({ user, onLogout }) {
             className={`nav-tab ${currentView === 'timeline' ? 'active' : ''}`}
             onClick={() => setCurrentView('timeline')}
           >
-            📌 Events
+            🕒 Timeline
+          </button>
+          <button
+            className={`nav-tab ${currentView === 'assets' ? 'active' : ''}`}
+            onClick={() => setCurrentView('assets')}
+          >
+            🖼️ Assets
+          </button>
+          <button
+            className={`nav-tab ${currentView === 'settings' ? 'active' : ''}`}
+            onClick={() => setCurrentView('settings')}
+          >
+            ⚙️ Settings
           </button>
         </div>
         <div className="nav-actions">
@@ -78,8 +126,39 @@ function MainApp({ user, onLogout }) {
       <div className="content-container">
         {currentView === 'map' && (
           <div className="map-container">
-            <ImageMap key="image-map" userRole={user.role} timeCursor={timeCursor} />
+            <ImageMap
+              key="image-map"
+              userRole={user.role}
+              timeCursor={timeCursor}
+              timeStart={timeStart}
+              ignoreTimeFilter={ignoreTimeFilter}
+              onEditImage={(id) => {
+                setAssetEditorId(id);
+                setAssetEditorReturnView('map');
+                setCurrentView('asset');
+              }}
+            />
           </div>
+        )}
+        {currentView === 'assets' && (
+          <AssetList
+            readOnly={!canWrite}
+            onEdit={(id) => {
+              setAssetEditorId(id);
+              setAssetEditorReturnView('assets');
+              setCurrentView('asset');
+            }}
+          />
+        )}
+        {currentView === 'asset' && (
+          <AssetEditor
+            assetId={assetEditorId}
+            readOnly={!canWrite}
+            onBack={() => {
+              setCurrentView(assetEditorReturnView || 'map');
+              setAssetEditorId(null);
+            }}
+          />
         )}
         {currentView === 'entities' && (
           <EntityManager userRole={user.role} />
@@ -89,7 +168,15 @@ function MainApp({ user, onLogout }) {
             userRole={user.role}
             timeCursor={timeCursor}
             onTimeCursorChange={setTimeCursor}
+            timeStart={timeStart}
+            onTimeStartChange={setTimeStart}
+            ignoreTimeFilter={ignoreTimeFilter}
+            onIgnoreTimeFilterChange={setIgnoreTimeFilter}
           />
+        )}
+
+        {currentView === 'settings' && (
+          <Settings />
         )}
       </div>
     </div>

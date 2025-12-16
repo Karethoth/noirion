@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import ImageModal from './ImageModal';
@@ -47,7 +47,7 @@ function toDatetimeLocalValue(date) {
 }
 
 // Component to restore saved view or fit bounds to markers
-function MapInitializer({ images, hasInitialized }) {
+function MapInitializer({ points, hasInitialized }) {
   const map = useMap();
 
   useEffect(() => {
@@ -58,10 +58,17 @@ function MapInitializer({ images, hasInitialized }) {
       map.setView(savedMapView.center, savedMapView.zoom, { animate: false });
       hasInitialized.current = true;
     }
-    // Otherwise, fit bounds to markers if we have images
-    else if (images.length > 0) {
-      const bounds = L.latLngBounds(images.map(img => [img.latitude, img.longitude]));
+    // Otherwise, fit bounds to markers if we have any geolocated points
+    else if (points.length > 0) {
+      const bounds = L.latLngBounds(points);
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+
+      try {
+        const c = bounds.getCenter();
+        localStorage.setItem('mapAutoCenter', JSON.stringify([c.lat, c.lng]));
+      } catch {
+        // ignore
+      }
       hasInitialized.current = true;
     }
     // Only run on mount by excluding images from dependencies
@@ -142,17 +149,34 @@ const MAP_STYLES = {
   }
 };
 
-const ImageMap = ({ userRole, timeCursor = null }) => {
+const ImageMap = ({
+  userRole,
+  timeCursor = null,
+  timeStart = null,
+  ignoreTimeFilter = { events: false, presences: false, images: false },
+  onEditImage = null,
+}) => {
   const { loading, error, data } = useQuery(GET_IMAGES, {
     fetchPolicy: 'cache-and-network', // Use cache first, then update in background
     nextFetchPolicy: 'cache-first', // After first fetch, prefer cache
   });
+
+  const eventsVariables = useMemo(() => {
+    if (ignoreTimeFilter?.events) return { before: null, after: null };
+    return { before: timeCursor || null, after: timeStart || null };
+  }, [ignoreTimeFilter?.events, timeCursor, timeStart]);
+
+  const presencesVariables = useMemo(() => {
+    if (ignoreTimeFilter?.presences) return { before: null, after: null };
+    return { before: timeCursor || null, after: timeStart || null };
+  }, [ignoreTimeFilter?.presences, timeCursor, timeStart]);
+
   const { data: eventsData } = useQuery(GET_EVENTS, {
-    variables: { before: timeCursor || null },
+    variables: eventsVariables,
     fetchPolicy: 'cache-and-network'
   });
   const { data: presencesData, refetch: refetchPresences } = useQuery(GET_PRESENCES, {
-    variables: { before: timeCursor || null },
+    variables: presencesVariables,
     fetchPolicy: 'cache-and-network'
   });
   const { data: locationsData, refetch: refetchLocations } = useQuery(GET_ENTITIES, {
@@ -208,16 +232,26 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
   const imagesWithLocation = useMemo(() => {
     const images = data?.images?.filter(img => img.latitude && img.longitude) || [];
 
-    if (!timeCursor) return images;
+    if (ignoreTimeFilter?.images) return images;
 
-    const cursor = new Date(timeCursor).getTime();
+    const beforeMs = timeCursor ? new Date(timeCursor).getTime() : null;
+    const afterMs = timeStart ? new Date(timeStart).getTime() : null;
+    if ((beforeMs != null && Number.isNaN(beforeMs)) || (afterMs != null && Number.isNaN(afterMs))) {
+      return images;
+    }
+
+    if (beforeMs == null && afterMs == null) return images;
+
     return images.filter((img) => {
       const t = img.captureTimestamp || img.uploadedAt;
       if (!t) return false;
       const ms = new Date(t).getTime();
-      return ms <= cursor;
+      if (Number.isNaN(ms)) return false;
+      if (beforeMs != null && ms > beforeMs) return false;
+      if (afterMs != null && ms < afterMs) return false;
+      return true;
     });
-  }, [data?.images, timeCursor]);
+  }, [data?.images, ignoreTimeFilter?.images, timeCursor, timeStart]);
 
   const eventIcon = useMemo(() => {
     return L.divIcon({
@@ -249,6 +283,15 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
     });
   }, []);
 
+  const draftPickIcon = useMemo(() => {
+    return L.divIcon({
+      className: 'custom-draft-marker',
+      html: '<div class="draft-marker-inner">+</div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+    });
+  }, []);
+
   const eventsWithLocation = useMemo(() => {
     return (eventsData?.events || []).filter((e) => e.latitude != null && e.longitude != null);
   }, [eventsData?.events]);
@@ -257,17 +300,105 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
     return (presencesData?.presences || []).filter((p) => p.latitude != null && p.longitude != null);
   }, [presencesData?.presences]);
 
+  const presencePaths = useMemo(() => {
+    const byEntity = new Map();
+
+    const ensure = (entityId, label) => {
+      if (!byEntity.has(entityId)) {
+        byEntity.set(entityId, {
+          entityId,
+          label: label || null,
+          points: [],
+        });
+      } else if (label && !byEntity.get(entityId).label) {
+        byEntity.get(entityId).label = label;
+      }
+      return byEntity.get(entityId);
+    };
+
+    // Presences
+    for (const p of presencesWithLocation) {
+      const lat = p.latitude;
+      const lng = p.longitude;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const ts = p.observedAt ? new Date(p.observedAt).getTime() : null;
+
+      for (const pe of p.entities || []) {
+        const entityId = pe?.entityId;
+        if (!entityId) continue;
+        ensure(entityId, pe?.entity?.displayName).points.push({ lat, lng, ts });
+      }
+    }
+
+    // Events with linked entities count as presence points for those entities
+    for (const ev of eventsWithLocation) {
+      const lat = ev.latitude;
+      const lng = ev.longitude;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const ts = ev.occurredAt ? new Date(ev.occurredAt).getTime() : null;
+
+      for (const ee of ev.entities || []) {
+        const entityId = ee?.entityId;
+        if (!entityId) continue;
+        ensure(entityId, ee?.entity?.displayName).points.push({ lat, lng, ts });
+      }
+    }
+
+    const paths = [];
+    for (const entry of byEntity.values()) {
+      entry.points.sort((a, b) => {
+        const at = a.ts ?? 0;
+        const bt = b.ts ?? 0;
+        return at - bt;
+      });
+
+      const deduped = [];
+      for (const pt of entry.points) {
+        const last = deduped[deduped.length - 1];
+        if (last && last.lat === pt.lat && last.lng === pt.lng) continue;
+        deduped.push(pt);
+      }
+
+      const positions = deduped.map((pt) => [pt.lat, pt.lng]);
+      if (positions.length >= 2) {
+        paths.push({ entityId: entry.entityId, label: entry.label, positions });
+      }
+    }
+
+    return paths;
+  }, [presencesWithLocation, eventsWithLocation]);
+
   const locationsWithCoordinates = useMemo(() => {
     const locations = locationsData?.entities || [];
     const parsed = [];
 
+    const findAttr = (attrs, name) => {
+      const needle = String(name).toLowerCase();
+      return (attrs || []).find((a) => String(a?.attributeName || '').toLowerCase() === needle) || null;
+    };
+
     for (const loc of locations) {
       const attrs = loc.attributes || [];
-      const coordsAttr = attrs.find((a) => a.attributeName === 'coordinates');
+
+      const coordsAttr = findAttr(attrs, 'coordinates');
       const val = coordsAttr?.attributeValue;
-      const latitude = val?.latitude;
-      const longitude = val?.longitude;
-      if (latitude == null || longitude == null) continue;
+      let latitude = val?.latitude;
+      let longitude = val?.longitude;
+
+      if (latitude == null || longitude == null) {
+        const latAttr = findAttr(attrs, 'latitude');
+        const lngAttr = findAttr(attrs, 'longitude');
+        const latMaybe = latAttr?.attributeValue;
+        const lngMaybe = lngAttr?.attributeValue;
+        const latNum = typeof latMaybe === 'number' ? latMaybe : (typeof latMaybe === 'string' ? parseFloat(latMaybe) : null);
+        const lngNum = typeof lngMaybe === 'number' ? lngMaybe : (typeof lngMaybe === 'string' ? parseFloat(lngMaybe) : null);
+        if (latNum != null && !Number.isNaN(latNum)) latitude = latNum;
+        if (lngNum != null && !Number.isNaN(lngNum)) longitude = lngNum;
+      }
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
       parsed.push({
         id: loc.id,
         displayName: loc.displayName || 'Unnamed location',
@@ -278,6 +409,64 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
 
     return parsed;
   }, [locationsData?.entities]);
+
+  const initialGeolocatedPoints = useMemo(() => {
+    const pts = [];
+
+    for (const img of imagesWithLocation) {
+      if (Number.isFinite(img.latitude) && Number.isFinite(img.longitude)) {
+        pts.push([img.latitude, img.longitude]);
+      }
+    }
+
+    for (const ev of eventsWithLocation) {
+      if (Number.isFinite(ev.latitude) && Number.isFinite(ev.longitude)) {
+        pts.push([ev.latitude, ev.longitude]);
+      }
+    }
+
+    for (const p of presencesWithLocation) {
+      if (Number.isFinite(p.latitude) && Number.isFinite(p.longitude)) {
+        pts.push([p.latitude, p.longitude]);
+      }
+    }
+
+    for (const loc of locationsWithCoordinates) {
+      if (Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude)) {
+        pts.push([loc.latitude, loc.longitude]);
+      }
+    }
+
+    return pts;
+  }, [imagesWithLocation, eventsWithLocation, presencesWithLocation, locationsWithCoordinates]);
+
+  useEffect(() => {
+    if (!initialGeolocatedPoints || initialGeolocatedPoints.length === 0) return;
+
+    let sumLat = 0;
+    let sumLng = 0;
+    let count = 0;
+
+    for (const pt of initialGeolocatedPoints) {
+      if (!Array.isArray(pt) || pt.length !== 2) continue;
+      const lat = Number(pt[0]);
+      const lng = Number(pt[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      sumLat += lat;
+      sumLng += lng;
+      count += 1;
+    }
+
+    if (count === 0) return;
+    const avgLat = sumLat / count;
+    const avgLng = sumLng / count;
+
+    try {
+      localStorage.setItem('mapAutoCenter', JSON.stringify([avgLat, avgLng]));
+    } catch {
+      // ignore
+    }
+  }, [initialGeolocatedPoints]);
 
   const MapEditClickHandler = ({ enabled, onPick }) => {
     useMapEvents({
@@ -335,7 +524,7 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
               description: draftEventDescription.trim() || null
             }
           },
-          refetchQueries: [{ query: GET_EVENTS, variables: { before: timeCursor || null } }]
+          refetchQueries: [{ query: GET_EVENTS, variables: eventsVariables }]
         });
         showNotification('Event created', 'success');
         resetDraft();
@@ -771,7 +960,7 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
         />
         <MapStyleController style={mapStyle} />
         {!hasInitializedBounds.current && (
-          <MapInitializer images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
+          <MapInitializer points={initialGeolocatedPoints} hasInitialized={hasInitializedBounds} />
         )}
         <ViewPersistence />
         <MapEditClickHandler
@@ -781,6 +970,23 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
             setPickedLng(lng);
           }}
         />
+
+        {isEditMode && Number.isFinite(pickedLat) && Number.isFinite(pickedLng) && (
+          <Marker
+            key={`draft-pick-${pickedLat}-${pickedLng}`}
+            position={[pickedLat, pickedLng]}
+            icon={draftPickIcon}
+            interactive={false}
+          />
+        )}
+
+        {presencePaths.map((path) => (
+          <Polyline
+            key={`presence-path-${path.entityId}`}
+            positions={path.positions}
+            pathOptions={{ className: 'presence-path', weight: 3, opacity: 0.75 }}
+          />
+        ))}
 
         {locationsWithCoordinates.map((loc) => (
           <Marker
@@ -1038,6 +1244,9 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
           setSelectedImage(null);
         }}
         readOnly={!canWrite}
+        onEditDetails={(id) => {
+          if (typeof onEditImage === 'function') onEditImage(id);
+        }}
       />
     </div>
   );

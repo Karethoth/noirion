@@ -227,6 +227,37 @@ describe('Annotation GraphQL Resolvers', () => {
       });
     });
 
+    describe('analyzeAnnotation', () => {
+      test('should analyze annotation via ImageAnalysisService with correct parameters', async () => {
+        const mockAnalysis = {
+          caption: 'a car',
+          tags: ['vehicle'],
+          licensePlates: ['ABC-123'],
+          model: 'test-model',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          raw: { caption: 'a car' }
+        };
+
+        const { ImageAnalysisService } = await import('../src/services/image-analysis.js');
+        vi.spyOn(ImageAnalysisService.prototype, 'analyzeAnnotationById')
+          .mockResolvedValue(mockAnalysis);
+
+        const result = await annotationResolvers.Mutation.analyzeAnnotation(
+          null,
+          { annotationId: 123, regionId: 456, model: 'test-model', persist: false },
+          mockContext
+        );
+
+        expect(result).toEqual(mockAnalysis);
+        expect(ImageAnalysisService.prototype.analyzeAnnotationById).toHaveBeenCalledWith(123, {
+          regionId: 456,
+          model: 'test-model',
+          persist: false,
+          userId: 1,
+        });
+      });
+    });
+
     describe('updateAnnotationRegion', () => {
       test('should update region with new coordinates', async () => {
         const input = {

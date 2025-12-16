@@ -1,8 +1,8 @@
 import { gql } from '@apollo/client';
 
 export const GET_PRESENCES = gql`
-  query GetPresences($before: String) {
-    presences(before: $before, limit: 500, offset: 0) {
+  query GetPresences($before: String, $after: String) {
+    presences(before: $before, after: $after, limit: 500, offset: 0) {
       id
       observedAt
       latitude

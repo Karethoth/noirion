@@ -26,6 +26,9 @@ export const typeDefs = `#graphql
 
     # Events
     events(before: String, after: String, limit: Int, offset: Int): [Event!]!
+    eventsByEntity(entityId: ID!, before: String, after: String, limit: Int, offset: Int): [Event!]!
+
+    projectSettings: ProjectSettings!
   }
 
   type Mutation {
@@ -36,6 +39,11 @@ export const typeDefs = `#graphql
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
     deleteImage(id: ID!): Boolean!
+    updateImage(id: ID!, input: UpdateImageInput!): Image!
+
+    analyzeImage(id: ID!, model: String, persist: Boolean = true): ImageAIAnalysis!
+    analyzeAnnotation(annotationId: ID!, regionId: ID, model: String, persist: Boolean = true): AnnotationAIAnalysis!
+    analyzeAnnotationDraft(assetId: ID!, input: AddRegionInput!, model: String): AnnotationAIAnalysis!
 
     # Annotation mutations
     createAnnotation(input: CreateAnnotationInput!): Annotation!
@@ -68,6 +76,21 @@ export const typeDefs = `#graphql
     createEvent(input: CreateEventInput!): Event!
     updateEvent(id: ID!, input: UpdateEventInput!): Event!
     deleteEvent(id: ID!): Boolean!
+
+    updateProjectSettings(input: UpdateProjectSettingsInput!): ProjectSettings!
+    recalculateProjectHomeLocation: ProjectSettings!
+  }
+
+  type ProjectSettings {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean!
+  }
+
+  input UpdateProjectSettingsInput {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean
   }
 
   type AuthPayload {
@@ -90,6 +113,7 @@ export const typeDefs = `#graphql
     id: ID!
     filename: String!
     originalName: String!
+    displayName: String
     filePath: String!
     sha256Hash: String!
     fileSize: Int!
@@ -142,8 +166,36 @@ export const typeDefs = `#graphql
     exifData: JSON
     metadata: JSON
 
+    # AI-derived metadata
+    aiAnalysis: ImageAIAnalysis
+
     # Relationships
     annotations: [Annotation!]!
+  }
+
+  input UpdateImageInput {
+    displayName: String
+    latitude: Float
+    longitude: Float
+    altitude: Float
+    captureTimestamp: String
+  }
+
+  type ImageAIAnalysis {
+    caption: String
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
+  }
+
+  type AnnotationAIAnalysis {
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
   }
 
   input BoundsInput {
@@ -174,6 +226,7 @@ export const typeDefs = `#graphql
     createdAt: String!
     updatedAt: String!
     metadata: JSON
+    aiAnalysis: AnnotationAIAnalysis
   }
 
   type AnnotationRegion {
@@ -268,6 +321,21 @@ export const typeDefs = `#graphql
     createdBy: ID
     createdAt: String
     metadata: JSON
+    entities: [EventEntity!]!
+  }
+
+  type EventEntity {
+    eventId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input EventEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
   }
 
   input CreateEventInput {
@@ -277,6 +345,7 @@ export const typeDefs = `#graphql
     title: String!
     description: String
     metadata: JSON
+    entities: [EventEntityInput!]
   }
 
   input UpdateEventInput {
@@ -286,6 +355,7 @@ export const typeDefs = `#graphql
     title: String!
     description: String
     metadata: JSON
+    entities: [EventEntityInput!]
   }
 
   input CreateEntityLinkInput {
