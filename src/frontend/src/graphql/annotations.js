@@ -126,6 +126,10 @@ export const ANALYZE_ANNOTATION = gql`
       licensePlates
       model
       createdAt
+      runId
+      cropUrl
+      cropDataUrl
+      cropDebug
     }
   }
 `;
@@ -138,6 +142,30 @@ export const ANALYZE_ANNOTATION_DRAFT = gql`
       licensePlates
       model
       createdAt
+      runId
+      cropUrl
+      cropDataUrl
+      cropDebug
+    }
+  }
+`;
+
+export const GET_ANNOTATION_AI_ANALYSIS_RUNS = gql`
+  query GetAnnotationAiAnalysisRuns($annotationId: ID, $limit: Int) {
+    annotationAiAnalysisRuns(annotationId: $annotationId, limit: $limit) {
+      id
+      annotationId
+      assetId
+      assetFilename
+      regionId
+      createdAt
+      createdBy
+      model
+      caption
+      tags
+      licensePlates
+      cropUrl
+      cropDebug
     }
   }
 `;

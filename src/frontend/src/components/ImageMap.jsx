@@ -155,6 +155,8 @@ const ImageMap = ({
   timeStart = null,
   ignoreTimeFilter = { events: false, presences: false, images: false },
   onEditImage = null,
+  openImageId = null,
+  onOpenImageHandled = null,
 }) => {
   const { loading, error, data } = useQuery(GET_IMAGES, {
     fetchPolicy: 'cache-and-network', // Use cache first, then update in background
@@ -200,6 +202,22 @@ const ImageMap = ({
   });
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
+
+  // External request to open an image (e.g. immediately after upload).
+  useEffect(() => {
+    if (!openImageId) return;
+    const images = data?.images;
+    if (!Array.isArray(images) || images.length === 0) return;
+
+    const found = images.find((img) => img?.id === openImageId);
+    if (!found) return;
+
+    setSelectedImage(found);
+    setIsModalOpen(true);
+    if (typeof onOpenImageHandled === 'function') {
+      onOpenImageHandled(openImageId);
+    }
+  }, [openImageId, data?.images, onOpenImageHandled]);
 
   const [notification, setNotification] = useState(null);
   const showNotification = (message, type = 'info') => {

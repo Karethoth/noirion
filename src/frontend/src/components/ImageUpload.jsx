@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { useMutation } from '@apollo/client/react';
 import { UPLOAD_IMAGE, UPLOAD_IMAGES, GET_IMAGES } from '../graphql/images';
 
-const ImageUpload = () => {
+const ImageUpload = ({ onUploaded = null }) => {
   const [uploadImage] = useMutation(UPLOAD_IMAGE, {
     refetchQueries: [{ query: GET_IMAGES }],
     awaitRefetchQueries: false, // Don't wait for refetch to complete
@@ -20,15 +20,22 @@ const ImageUpload = () => {
 
     try {
       if (acceptedFiles.length === 1) {
-        await uploadImage({
+        const res = await uploadImage({
           variables: { file: acceptedFiles[0] }
         });
+        const uploaded = res?.data?.uploadImage || null;
+        if (uploaded && typeof onUploaded === 'function') {
+          onUploaded(uploaded);
+        }
       } else if (acceptedFiles.length > 1) {
         await uploadImages({
           variables: { files: acceptedFiles }
         });
       }
-      alert(`Successfully uploaded ${acceptedFiles.length} image(s)`);
+      // Avoid a blocking alert for single-image uploads since we auto-open the editor.
+      if (acceptedFiles.length !== 1) {
+        alert(`Successfully uploaded ${acceptedFiles.length} image(s)`);
+      }
     } catch (error) {
       console.error('Upload error:', error);
       alert(`Upload failed: ${error.message}`);

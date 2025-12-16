@@ -1,6 +1,7 @@
 import { AnnotationService } from '../../services/annotations.js';
 import { AssetsService } from '../../services/assets.js';
 import { ImageAnalysisService } from '../../services/image-analysis.js';
+import { AnnotationAiAnalysisRunsService } from '../../services/annotation-ai-analysis-runs.js';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
 
 const annotationResolvers = {
@@ -15,7 +16,16 @@ const annotationResolvers = {
       requireAuth(context.user);
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getAnnotationById(args.id);
-    }
+    },
+
+    annotationAiAnalysisRuns: async (parent, args, context) => {
+      requireAuth(context.user);
+      const runs = new AnnotationAiAnalysisRunsService(context.dbPool);
+      return await runs.listRuns({
+        annotationId: args.annotationId || null,
+        limit: args.limit ?? 20,
+      });
+    },
   },
 
   Mutation: {
@@ -147,6 +157,21 @@ const annotationResolvers = {
       }
     }
   }
+};
+
+// Field resolvers for analysis run rows (snake_case -> camelCase)
+annotationResolvers.AnnotationAIAnalysisRun = {
+  annotationId: (p) => p.annotation_id,
+  assetId: (p) => p.asset_id,
+  assetFilename: (p) => p.asset_filename,
+  regionId: (p) => p.region_id,
+  createdAt: (p) => (p.created_at instanceof Date ? p.created_at.toISOString() : p.created_at),
+  createdBy: (p) => p.created_by,
+  cropUrl: (p) => p.crop_path,
+  cropDebug: (p) => p.crop_debug,
+  caption: (p) => p.analysis?.caption ?? null,
+  tags: (p) => (Array.isArray(p.analysis?.tags) ? p.analysis.tags : []),
+  licensePlates: (p) => (Array.isArray(p.analysis?.licensePlates) ? p.analysis.licensePlates : []),
 };
 
 export default annotationResolvers;

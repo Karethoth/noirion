@@ -23,6 +23,7 @@ function MainApp({ user, onLogout }) {
   const [currentView, setCurrentView] = useState('map');
   const [assetEditorId, setAssetEditorId] = useState(null);
   const [assetEditorReturnView, setAssetEditorReturnView] = useState('map');
+  const [openMapImageId, setOpenMapImageId] = useState(null);
   const [timeStart, setTimeStart] = useState(() => {
     return localStorage.getItem('timeStart') || null;
   });
@@ -104,7 +105,25 @@ function MainApp({ user, onLogout }) {
           </button>
         </div>
         <div className="nav-actions">
-          {canWrite && currentView === 'map' && <ImageUpload />}
+          {canWrite && currentView === 'map' && (
+            <ImageUpload
+              onUploaded={(uploaded) => {
+                if (!uploaded?.id) return;
+
+                const hasCoords = Number.isFinite(uploaded.latitude) && Number.isFinite(uploaded.longitude);
+                if (hasCoords) {
+                  setAssetEditorId(null);
+                  setCurrentView('map');
+                  setOpenMapImageId(uploaded.id);
+                } else {
+                  setOpenMapImageId(null);
+                  setAssetEditorId(uploaded.id);
+                  setAssetEditorReturnView('map');
+                  setCurrentView('asset');
+                }
+              }}
+            />
+          )}
           {!canWrite && (
             <div className="read-only-badge" title="Your role has read-only access">
               Read-Only
@@ -132,6 +151,8 @@ function MainApp({ user, onLogout }) {
               timeCursor={timeCursor}
               timeStart={timeStart}
               ignoreTimeFilter={ignoreTimeFilter}
+              openImageId={openMapImageId}
+              onOpenImageHandled={() => setOpenMapImageId(null)}
               onEditImage={(id) => {
                 setAssetEditorId(id);
                 setAssetEditorReturnView('map');

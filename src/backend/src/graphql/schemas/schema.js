@@ -29,6 +29,24 @@ export const typeDefs = `#graphql
     eventsByEntity(entityId: ID!, before: String, after: String, limit: Int, offset: Int): [Event!]!
 
     projectSettings: ProjectSettings!
+
+    annotationAiAnalysisRuns(annotationId: ID, limit: Int = 20): [AnnotationAIAnalysisRun!]!
+  }
+
+  type AnnotationAIAnalysisRun {
+    id: ID!
+    annotationId: ID!
+    assetId: ID!
+    assetFilename: String
+    regionId: ID
+    createdAt: String!
+    createdBy: ID
+    model: String
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    cropUrl: String
+    cropDebug: JSON
   }
 
   type Mutation {
@@ -196,6 +214,10 @@ export const typeDefs = `#graphql
     model: String
     createdAt: String
     raw: JSON
+     runId: ID
+     cropUrl: String
+     cropDataUrl: String
+     cropDebug: JSON
   }
 
   input BoundsInput {
@@ -325,6 +347,7 @@ export const typeDefs = `#graphql
   }
 
   type EventEntity {
+
     eventId: ID!
     entityId: ID!
     entity: Entity
