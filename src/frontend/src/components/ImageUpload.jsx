@@ -1,53 +1,7 @@
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { gql } from '@apollo/client';
 import { useMutation } from '@apollo/client/react';
-
-const UPLOAD_IMAGE = gql`
-  mutation UploadImage($file: Upload!) {
-    uploadImage(file: $file) {
-      id
-      filename
-      filePath
-      fileSize
-      latitude
-      longitude
-      captureTimestamp
-      uploadedAt
-    }
-  }
-`;
-
-const UPLOAD_IMAGES = gql`
-  mutation UploadImages($files: [Upload!]!) {
-    uploadImages(files: $files) {
-      id
-      filename
-      filePath
-      fileSize
-      latitude
-      longitude
-      captureTimestamp
-      uploadedAt
-    }
-  }
-`;
-
-const GET_IMAGES = gql`
-  query GetImages {
-    images {
-      id
-      filename
-      filePath
-      latitude
-      longitude
-      captureTimestamp
-      cameraMake
-      cameraModel
-      uploadedAt
-    }
-  }
-`;
+import { UPLOAD_IMAGE, UPLOAD_IMAGES, GET_IMAGES } from '../graphql/images';
 
 const ImageUpload = () => {
   const [uploadImage] = useMutation(UPLOAD_IMAGE, {

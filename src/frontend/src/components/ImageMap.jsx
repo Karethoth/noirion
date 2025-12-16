@@ -1,12 +1,17 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { gql } from '@apollo/client';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import ImageModal from './ImageModal';
+import Notification from './Notification';
+import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
+import { GET_IMAGES, DELETE_IMAGE } from '../graphql/images';
+import { GET_EVENTS, CREATE_EVENT } from '../graphql/events';
+import { GET_PRESENCES, CREATE_PRESENCE } from '../graphql/presences';
+import { GET_ENTITIES, CREATE_ENTITY, ADD_ENTITY_ATTRIBUTE } from '../graphql/entities';
 
 // Save/restore map position across component remounts
 // Store both in module scope and localStorage for persistence
@@ -30,44 +35,16 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const GET_IMAGES = gql`
-  query GetImages {
-    images {
-      id
-      filename
-      filePath
-      latitude
-      longitude
-      captureTimestamp
-      cameraMake
-      cameraModel
-      uploadedAt
-      annotations {
-        id
-        tags
-      }
-    }
-  }
-`;
 
-const DELETE_IMAGE = gql`
-  mutation DeleteImage($id: ID!) {
-    deleteImage(id: $id)
-  }
-`;
-
-const GET_EVENTS = gql`
-  query GetEvents($before: String) {
-    events(before: $before, limit: 500, offset: 0) {
-      id
-      occurredAt
-      latitude
-      longitude
-      title
-      description
-    }
-  }
-`;
+function toDatetimeLocalValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mi = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
 
 // Component to restore saved view or fit bounds to markers
 function MapInitializer({ images, hasInitialized }) {
@@ -174,7 +151,23 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
     variables: { before: timeCursor || null },
     fetchPolicy: 'cache-and-network'
   });
+  const { data: presencesData, refetch: refetchPresences } = useQuery(GET_PRESENCES, {
+    variables: { before: timeCursor || null },
+    fetchPolicy: 'cache-and-network'
+  });
+  const { data: locationsData, refetch: refetchLocations } = useQuery(GET_ENTITIES, {
+    variables: { entityType: 'location', limit: 500, offset: 0 },
+    fetchPolicy: 'cache-and-network'
+  });
   const [deleteImage] = useMutation(DELETE_IMAGE);
+  const [createEvent] = useMutation(CREATE_EVENT, {
+    onCompleted: () => {
+      // eventsData query will refresh via cache; map shows new marker after refetch
+    }
+  });
+  const [createPresence] = useMutation(CREATE_PRESENCE);
+  const [createEntity] = useMutation(CREATE_ENTITY);
+  const [addEntityAttribute] = useMutation(ADD_ENTITY_ATTRIBUTE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [mapStyle, setMapStyle] = useState(() => {
@@ -184,7 +177,27 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
   const hasInitializedBounds = useRef(false);
   const mapRef = useRef(null);
 
+  const [notification, setNotification] = useState(null);
+  const showNotification = (message, type = 'info') => {
+    setNotification({ message, type });
+  };
+
   const canWrite = userRole === 'admin' || userRole === 'investigator';
+
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editKind, setEditKind] = useState('event'); // 'event' | 'presence' | 'location'
+  const [pickedLat, setPickedLat] = useState(null);
+  const [pickedLng, setPickedLng] = useState(null);
+
+  const [draftEventTitle, setDraftEventTitle] = useState('');
+  const [draftEventDescription, setDraftEventDescription] = useState('');
+  const [draftEventOccurredAt, setDraftEventOccurredAt] = useState(() => toDatetimeLocalValue(new Date()));
+
+  const [draftPresenceObservedAt, setDraftPresenceObservedAt] = useState(() => toDatetimeLocalValue(new Date()));
+  const [draftPresenceNotes, setDraftPresenceNotes] = useState('');
+  const [draftPresenceEntities, setDraftPresenceEntities] = useState([]); // [{ id, displayName, entityType }]
+
+  const [draftLocationName, setDraftLocationName] = useState('');
 
   // Save map style to localStorage whenever it changes
   useEffect(() => {
@@ -216,9 +229,194 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
     });
   }, []);
 
+  const presenceIcon = useMemo(() => {
+    return L.divIcon({
+      className: 'custom-presence-marker',
+      html: '<div class="presence-marker-inner">P</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+  }, []);
+
+  const locationIcon = useMemo(() => {
+    return L.divIcon({
+      className: 'custom-location-marker',
+      html: '<div class="location-marker-inner">L</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+      popupAnchor: [0, -28]
+    });
+  }, []);
+
   const eventsWithLocation = useMemo(() => {
     return (eventsData?.events || []).filter((e) => e.latitude != null && e.longitude != null);
   }, [eventsData?.events]);
+
+  const presencesWithLocation = useMemo(() => {
+    return (presencesData?.presences || []).filter((p) => p.latitude != null && p.longitude != null);
+  }, [presencesData?.presences]);
+
+  const locationsWithCoordinates = useMemo(() => {
+    const locations = locationsData?.entities || [];
+    const parsed = [];
+
+    for (const loc of locations) {
+      const attrs = loc.attributes || [];
+      const coordsAttr = attrs.find((a) => a.attributeName === 'coordinates');
+      const val = coordsAttr?.attributeValue;
+      const latitude = val?.latitude;
+      const longitude = val?.longitude;
+      if (latitude == null || longitude == null) continue;
+      parsed.push({
+        id: loc.id,
+        displayName: loc.displayName || 'Unnamed location',
+        latitude,
+        longitude
+      });
+    }
+
+    return parsed;
+  }, [locationsData?.entities]);
+
+  const MapEditClickHandler = ({ enabled, onPick }) => {
+    useMapEvents({
+      click(e) {
+        if (!enabled) return;
+        const target = e.originalEvent?.target;
+        if (target && (target.closest?.('.leaflet-marker-icon') || target.closest?.('.leaflet-popup'))) {
+          return;
+        }
+        onPick(e.latlng.lat, e.latlng.lng);
+      }
+    });
+    return null;
+  };
+
+  const resetDraft = () => {
+    setPickedLat(null);
+    setPickedLng(null);
+    setDraftEventTitle('');
+    setDraftEventDescription('');
+    setDraftEventOccurredAt(toDatetimeLocalValue(new Date()));
+    setDraftPresenceObservedAt(toDatetimeLocalValue(new Date()));
+    setDraftPresenceNotes('');
+    setDraftPresenceEntities([]);
+    setDraftLocationName('');
+  };
+
+  const handleCreateFromMap = async () => {
+    if (!canWrite) return;
+
+    if (pickedLat == null || pickedLng == null) {
+      showNotification('Click the map to choose a location first', 'error');
+      return;
+    }
+
+    try {
+      if (editKind === 'event') {
+        if (!draftEventTitle.trim()) {
+          showNotification('Event title is required', 'error');
+          return;
+        }
+        const occurredAtDate = new Date(draftEventOccurredAt);
+        if (Number.isNaN(occurredAtDate.getTime())) {
+          showNotification('Invalid occurredAt', 'error');
+          return;
+        }
+
+        await createEvent({
+          variables: {
+            input: {
+              occurredAt: occurredAtDate.toISOString(),
+              latitude: pickedLat,
+              longitude: pickedLng,
+              title: draftEventTitle.trim(),
+              description: draftEventDescription.trim() || null
+            }
+          },
+          refetchQueries: [{ query: GET_EVENTS, variables: { before: timeCursor || null } }]
+        });
+        showNotification('Event created', 'success');
+        resetDraft();
+        return;
+      }
+
+      if (editKind === 'presence') {
+        if (draftPresenceEntities.length === 0) {
+          showNotification('Select at least one entity for a presence', 'error');
+          return;
+        }
+        const observedAtDate = new Date(draftPresenceObservedAt);
+        if (Number.isNaN(observedAtDate.getTime())) {
+          showNotification('Invalid observedAt', 'error');
+          return;
+        }
+
+        await createPresence({
+          variables: {
+            input: {
+              observedAt: observedAtDate.toISOString(),
+              latitude: pickedLat,
+              longitude: pickedLng,
+              notes: draftPresenceNotes.trim() || null,
+              entities: draftPresenceEntities.map((e) => ({ entityId: e.id }))
+            }
+          }
+        });
+        if (refetchPresences) {
+          await refetchPresences();
+        }
+        showNotification('Presence created', 'success');
+        resetDraft();
+        return;
+      }
+
+      if (editKind === 'location') {
+        if (!draftLocationName.trim()) {
+          showNotification('Location name is required', 'error');
+          return;
+        }
+
+        const entityResult = await createEntity({
+          variables: {
+            input: {
+              entityType: 'location',
+              displayName: draftLocationName.trim()
+            }
+          }
+        });
+        const newEntityId = entityResult?.data?.createEntity?.id;
+        if (!newEntityId) {
+          throw new Error('Location entity id missing from response');
+        }
+
+        await addEntityAttribute({
+          variables: {
+            entityId: newEntityId,
+            input: {
+              attributeName: 'coordinates',
+              attributeValue: {
+                latitude: pickedLat,
+                longitude: pickedLng
+              },
+              confidence: 1.0
+            }
+          }
+        });
+
+        if (refetchLocations) {
+          await refetchLocations();
+        }
+        showNotification('Location created', 'success');
+        resetDraft();
+        return;
+      }
+    } catch (err) {
+      console.error('Create failed:', err);
+      showNotification(`Create failed: ${err.message}`, 'error');
+    }
+  };
 
   // Calculate distance between two coordinates in meters (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -351,8 +549,18 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
     });
   };
 
+  const mapUiTheme = mapStyle === 'day' ? 'map-ui-light' : 'map-ui-dark';
+
   return (
-    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+    <div className={`map-overlay-root ${mapUiTheme}`} style={{ height: '100%', width: '100%', position: 'relative' }}>
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
+
       {/* Map Style Toggle */}
       <div className="map-style-toggle">
         {Object.entries(MAP_STYLES).map(([key, style]) => (
@@ -365,6 +573,189 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
           </button>
         ))}
       </div>
+
+      {/* Map Edit Panel */}
+      {canWrite && (
+        <div className="map-edit-panel">
+          <div className="map-edit-header">
+            <button
+              className={`map-edit-toggle ${isEditMode ? 'active' : ''}`}
+              onClick={() => {
+                setIsEditMode((v) => {
+                  const next = !v;
+                  if (!next) {
+                    resetDraft();
+                  }
+                  return next;
+                });
+              }}
+            >
+              Edit
+            </button>
+          </div>
+
+          {isEditMode && (
+            <div className="map-edit-body">
+              <div className="map-edit-row">
+                <label className="map-edit-label">Create</label>
+                <select
+                  className="map-edit-select"
+                  value={editKind}
+                  onChange={(e) => {
+                    setEditKind(e.target.value);
+                    setPickedLat(null);
+                    setPickedLng(null);
+                  }}
+                >
+                  <option value="event">Event</option>
+                  <option value="presence">Presence</option>
+                  <option value="location">Location</option>
+                </select>
+              </div>
+
+              <div className="map-edit-row">
+                <div className="map-edit-hint">
+                  Click the map to place a point.
+                </div>
+              </div>
+
+              <div className="map-edit-row">
+                <div className="map-edit-coords" role="group" aria-label="Selected location">
+                  <span className="map-edit-coords-text">
+                    {pickedLat != null && pickedLng != null ? (
+                      <>📍 {formatMGRS(pickedLng, pickedLat)}</>
+                    ) : (
+                      <span className="map-edit-muted">No location selected</span>
+                    )}
+                  </span>
+                  {pickedLat != null && pickedLng != null && (
+                    <button
+                      type="button"
+                      className="map-edit-coords-clear"
+                      onClick={() => {
+                        setPickedLat(null);
+                        setPickedLng(null);
+                      }}
+                      aria-label="Clear location"
+                      title="Clear location"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {editKind === 'event' && (
+                <>
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Title</label>
+                    <input
+                      className="map-edit-input"
+                      value={draftEventTitle}
+                      onChange={(e) => setDraftEventTitle(e.target.value)}
+                      placeholder="Event title"
+                    />
+                  </div>
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Occurred at</label>
+                    <input
+                      className="map-edit-input"
+                      type="datetime-local"
+                      value={draftEventOccurredAt}
+                      onChange={(e) => setDraftEventOccurredAt(e.target.value)}
+                    />
+                  </div>
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Description</label>
+                    <input
+                      className="map-edit-input"
+                      value={draftEventDescription}
+                      onChange={(e) => setDraftEventDescription(e.target.value)}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </>
+              )}
+
+              {editKind === 'presence' && (
+                <>
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Observed at</label>
+                    <input
+                      className="map-edit-input"
+                      type="datetime-local"
+                      value={draftPresenceObservedAt}
+                      onChange={(e) => setDraftPresenceObservedAt(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Entities</label>
+                    <div style={{ width: '100%' }}>
+                      <EntitySearch
+                        placeholder="Search entities to link..."
+                        onSelect={(entity) => {
+                          setDraftPresenceEntities((prev) => {
+                            if (prev.some((e) => e.id === entity.id)) return prev;
+                            return [...prev, entity];
+                          });
+                        }}
+                      />
+                      {draftPresenceEntities.length > 0 && (
+                        <div className="map-edit-chips">
+                          {draftPresenceEntities.map((e) => (
+                            <button
+                              key={e.id}
+                              className="map-edit-chip"
+                              onClick={() => setDraftPresenceEntities((prev) => prev.filter((x) => x.id !== e.id))}
+                              title="Remove"
+                            >
+                              {e.displayName} ✕
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Notes</label>
+                    <input
+                      className="map-edit-input"
+                      value={draftPresenceNotes}
+                      onChange={(e) => setDraftPresenceNotes(e.target.value)}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </>
+              )}
+
+              {editKind === 'location' && (
+                <>
+                  <div className="map-edit-row">
+                    <label className="map-edit-label">Name</label>
+                    <input
+                      className="map-edit-input"
+                      value={draftLocationName}
+                      onChange={(e) => setDraftLocationName(e.target.value)}
+                      placeholder="Location name"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="map-edit-actions">
+                <button className="map-edit-primary" onClick={handleCreateFromMap}>
+                  Create
+                </button>
+                <button className="map-edit-secondary" onClick={resetDraft}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <MapContainer
         key="main-map"
@@ -383,6 +774,67 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
           <MapInitializer images={imagesWithLocation} hasInitialized={hasInitializedBounds} />
         )}
         <ViewPersistence />
+        <MapEditClickHandler
+          enabled={isEditMode && canWrite}
+          onPick={(lat, lng) => {
+            setPickedLat(lat);
+            setPickedLng(lng);
+          }}
+        />
+
+        {locationsWithCoordinates.map((loc) => (
+          <Marker
+            key={`location-${loc.id}`}
+            position={[loc.latitude, loc.longitude]}
+            icon={locationIcon}
+          >
+            <Popup maxWidth={280} minWidth={260}>
+              <div style={{ padding: '4px' }}>
+                <div className="popup-filename">📍 {loc.displayName}</div>
+                <div className="popup-coordinates" style={{ marginTop: '8px' }}>
+                  {formatMGRS(loc.longitude, loc.latitude)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
+        {presencesWithLocation.map((p) => (
+          <Marker
+            key={`presence-${p.id}`}
+            position={[p.latitude, p.longitude]}
+            icon={presenceIcon}
+          >
+            <Popup maxWidth={300} minWidth={260}>
+              <div style={{ padding: '4px' }}>
+                <div className="popup-timestamp">
+                  👁️ {p.observedAt ? new Date(p.observedAt).toLocaleString() : 'Unknown time'}
+                </div>
+                <div className="popup-filename">
+                  Presence
+                </div>
+                {p.entities && p.entities.length > 0 && (
+                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                    {p.entities
+                      .map((pe) => pe?.entity?.displayName || `Entity ${pe.entityId}`)
+                      .filter(Boolean)
+                      .slice(0, 5)
+                      .join(', ')}
+                    {p.entities.length > 5 ? '…' : ''}
+                  </div>
+                )}
+                {p.notes && (
+                  <div style={{ marginTop: '8px', color: '#666', fontSize: '12px' }}>
+                    {p.notes}
+                  </div>
+                )}
+                <div className="popup-coordinates" style={{ marginTop: '8px' }}>
+                  📍 {formatMGRS(p.longitude, p.latitude)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
 
         {eventsWithLocation.map((ev) => (
           <Marker
@@ -566,6 +1018,12 @@ const ImageMap = ({ userRole, timeCursor = null }) => {
         <strong>{imagesWithLocation.length}</strong> image{imagesWithLocation.length !== 1 ? 's' : ''} with location data
         {eventsWithLocation.length > 0 && (
           <> · <span style={{ color: '#888' }}><strong>{eventsWithLocation.length}</strong> event{eventsWithLocation.length !== 1 ? 's' : ''}</span></>
+        )}
+        {presencesWithLocation.length > 0 && (
+          <> · <span style={{ color: '#888' }}><strong>{presencesWithLocation.length}</strong> presence{presencesWithLocation.length !== 1 ? 's' : ''}</span></>
+        )}
+        {locationsWithCoordinates.length > 0 && (
+          <> · <span style={{ color: '#888' }}><strong>{locationsWithCoordinates.length}</strong> location{locationsWithCoordinates.length !== 1 ? 's' : ''}</span></>
         )}
         {data?.images?.length > imagesWithLocation.length && (
           <> · <span style={{ color: '#888' }}>{data.images.length - imagesWithLocation.length} without location</span></>

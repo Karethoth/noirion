@@ -12,6 +12,17 @@ const presenceResolvers = {
         limit: args.limit,
         offset: args.offset
       });
+    },
+
+    presences: async (parent, args, context) => {
+      requireAuth(context.user);
+      const presenceService = new PresenceService(context.dbPool);
+      return await presenceService.getPresences({
+        before: args.before,
+        after: args.after,
+        limit: args.limit,
+        offset: args.offset
+      });
     }
   },
 

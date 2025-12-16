@@ -1,152 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { gql } from '@apollo/client';
-import { useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
+import { useMutation, useQuery } from '@apollo/client/react';
 import Notification from './Notification';
+import EntitySearch from './EntitySearch';
 import './EntityDetail.css';
-
-const GET_ENTITY = gql`
-  query GetEntity($id: ID!) {
-    entity(id: $id) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-        createdAt
-        updatedAt
-      }
-    }
-  }
-`;
-
-const CREATE_ENTITY = gql`
-  mutation CreateEntity($input: CreateEntityInput!) {
-    createEntity(input: $input) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-      }
-    }
-  }
-`;
-
-const UPDATE_ENTITY = gql`
-  mutation UpdateEntity($id: ID!, $input: UpdateEntityInput!) {
-    updateEntity(id: $id, input: $input) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      updatedAt
-    }
-  }
-`;
-
-const ADD_ENTITY_ATTRIBUTE = gql`
-  mutation AddEntityAttribute($entityId: ID!, $input: AddEntityAttributeInput!) {
-    addEntityAttribute(entityId: $entityId, input: $input) {
-      id
-      attributeName
-      attributeValue
-      confidence
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
-const UPDATE_ENTITY_ATTRIBUTE = gql`
-  mutation UpdateEntityAttribute($id: ID!, $input: UpdateEntityAttributeInput!) {
-    updateEntityAttribute(id: $id, input: $input) {
-      id
-      attributeName
-      attributeValue
-      confidence
-      updatedAt
-    }
-  }
-`;
-
-const DELETE_ENTITY_ATTRIBUTE = gql`
-  mutation DeleteEntityAttribute($id: ID!) {
-    deleteEntityAttribute(id: $id)
-  }
-`;
-
-const GET_PRESENCES_BY_ENTITY = gql`
-  query GetPresencesByEntity($entityId: ID!, $limit: Int, $offset: Int) {
-    presencesByEntity(entityId: $entityId, limit: $limit, offset: $offset) {
-      id
-      observedAt
-      latitude
-      longitude
-      notes
-      sourceType
-      sourceAsset {
-        id
-        filePath
-      }
-    }
-  }
-`;
-
-const GET_ENTITY_LINKS = gql`
-  query GetEntityLinks($entityId: ID!, $limit: Int, $offset: Int) {
-    entityLinks(entityId: $entityId, limit: $limit, offset: $offset) {
-      id
-      fromEntityId
-      toEntityId
-      relationType
-      confidence
-      notes
-      fromEntity { id displayName entityType }
-      toEntity { id displayName entityType }
-      createdAt
-    }
-  }
-`;
-
-const CREATE_ENTITY_LINK = gql`
-  mutation CreateEntityLink($input: CreateEntityLinkInput!) {
-    createEntityLink(input: $input) {
-      id
-    }
-  }
-`;
-
-const DELETE_ENTITY_LINK = gql`
-  mutation DeleteEntityLink($id: ID!) {
-    deleteEntityLink(id: $id)
-  }
-`;
-
-const SEARCH_ENTITIES = gql`
-  query SearchEntities($query: String!, $limit: Int) {
-    searchEntities(query: $query, limit: $limit) {
-      id
-      displayName
-      entityType
-      tags
-    }
-  }
-`;
+import {
+  GET_ENTITY,
+  CREATE_ENTITY,
+  UPDATE_ENTITY,
+  ADD_ENTITY_ATTRIBUTE,
+  UPDATE_ENTITY_ATTRIBUTE,
+  DELETE_ENTITY_ATTRIBUTE
+} from '../graphql/entities';
+import { GET_PRESENCES_BY_ENTITY } from '../graphql/presences';
+import { GET_ENTITY_LINKS, CREATE_ENTITY_LINK, DELETE_ENTITY_LINK } from '../graphql/entityLinks';
 
 const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const isNewEntity = !entity;
@@ -211,24 +77,11 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
     }
   });
 
-  const [searchEntities, { data: searchData }] = useLazyQuery(SEARCH_ENTITIES);
-  const [linkSearch, setLinkSearch] = useState('');
   const [selectedTargetId, setSelectedTargetId] = useState('');
+  const [selectedTargetLabel, setSelectedTargetLabel] = useState('');
   const [relationType, setRelationType] = useState('associates_with');
   const [linkConfidence, setLinkConfidence] = useState(1.0);
   const [linkNotes, setLinkNotes] = useState('');
-
-  const handleSearchEntities = async (value) => {
-    setLinkSearch(value);
-    if (!value || value.trim().length < 2) return;
-    try {
-      await searchEntities({
-        variables: { query: value.trim(), limit: 10 }
-      });
-    } catch (err) {
-      console.error('Entity search failed:', err);
-    }
-  };
 
   const handleCreateLink = async () => {
     if (!canWrite) {
@@ -257,6 +110,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
         }
       });
       setSelectedTargetId('');
+      setSelectedTargetLabel('');
       setLinkNotes('');
       showNotification('Relationship created', 'success');
     } catch (err) {
@@ -582,32 +436,37 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
               {canWrite && (
                 <div style={{ marginBottom: '12px' }}>
                   <div className="form-group">
-                    <label>Find target entity</label>
-                    <input
-                      type="text"
-                      value={linkSearch}
-                      onChange={(e) => handleSearchEntities(e.target.value)}
-                      placeholder="Search by name..."
-                      className="form-control"
-                    />
-                  </div>
-
-                  <div className="form-group">
                     <label>Target entity</label>
-                    <select
-                      value={selectedTargetId}
-                      onChange={(e) => setSelectedTargetId(e.target.value)}
-                      className="form-control"
-                    >
-                      <option value="">Select…</option>
-                      {(searchData?.searchEntities || [])
-                        .filter((e) => e.id !== entity?.id)
-                        .map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {(e.displayName || 'Unnamed')} ({e.entityType})
-                          </option>
-                        ))}
-                    </select>
+                    <EntitySearch
+                      placeholder="Search entities..."
+                      onSelect={(target) => {
+                        if (!target?.id) return;
+                        if (target.id === entity?.id) {
+                          showNotification('You cannot link an entity to itself', 'error');
+                          return;
+                        }
+                        setSelectedTargetId(target.id);
+                        setSelectedTargetLabel(`${target.displayName || 'Unnamed'} (${target.entityType || 'unknown'})`);
+                      }}
+                    />
+
+                    {selectedTargetId && (
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div style={{ color: '#666', fontSize: '13px' }}>
+                          Selected: <strong>{selectedTargetLabel || selectedTargetId}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-cancel"
+                          onClick={() => {
+                            setSelectedTargetId('');
+                            setSelectedTargetLabel('');
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group">

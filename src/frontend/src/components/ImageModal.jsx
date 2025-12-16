@@ -1,66 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { gql } from '@apollo/client';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import AnnotationViewer from './AnnotationViewer';
 import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
-
-// GraphQL queries and mutations
-const GET_ANNOTATIONS = gql`
-  query GetAnnotations($assetId: ID!) {
-    annotations(assetId: $assetId) {
-      id
-      title
-      description
-      tags
-      regions {
-        id
-        shapeType
-        coordinates
-        style
-      }
-      entityLinks {
-        id
-        entityId
-        entity {
-          id
-          displayName
-          entityType
-          tags
-        }
-        relationType
-        confidence
-        notes
-      }
-    }
-  }
-`;
-
-const ADD_ANNOTATION = gql`
-  mutation CreateAnnotation($input: CreateAnnotationInput!) {
-    createAnnotation(input: $input) {
-      id
-      regions { id shapeType coordinates style }
-    }
-  }
-`;
-
-const DELETE_ANNOTATION = gql`
-  mutation DeleteAnnotation($id: ID!) {
-    deleteAnnotation(id: $id)
-  }
-`;
-
-const ADD_REGION = gql`
-  mutation AddAnnotationRegion($annotationId: ID!, $input: AddRegionInput!) {
-    addAnnotationRegion(annotationId: $annotationId, input: $input) {
-      id
-      shapeType
-      coordinates
-      style
-    }
-  }
-`;
+import {
+  GET_ANNOTATIONS,
+  CREATE_ANNOTATION as ADD_ANNOTATION,
+  DELETE_ANNOTATION,
+  ADD_ANNOTATION_REGION as ADD_REGION
+} from '../graphql/annotations';
 
 
 const ImageModal = ({ image, isOpen, onClose, readOnly = false }) => {

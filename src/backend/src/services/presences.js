@@ -45,6 +45,44 @@ export class PresenceService {
     }
   }
 
+  async getPresences({ before, after, limit = 200, offset = 0 } = {}) {
+    const client = await this.dbPool.connect();
+    try {
+      const conditions = [];
+      const values = [];
+      let idx = 1;
+
+      if (before) {
+        conditions.push(`p.observed_at <= $${idx++}`);
+        values.push(new Date(before));
+      }
+      if (after) {
+        conditions.push(`p.observed_at >= $${idx++}`);
+        values.push(new Date(after));
+      }
+
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+      values.push(limit);
+      values.push(offset);
+
+      const result = await client.query(
+        `
+          SELECT p.*, ST_Y(p.geom) as latitude, ST_X(p.geom) as longitude
+          FROM presences p
+          ${where}
+          ORDER BY p.observed_at DESC
+          LIMIT $${idx++} OFFSET $${idx++}
+        `,
+        values
+      );
+
+      return result.rows.map((row) => this.formatPresence(row));
+    } finally {
+      client.release();
+    }
+  }
+
   async getPresenceEntities(presenceId) {
     const client = await this.dbPool.connect();
     try {

@@ -19,6 +19,7 @@ export const typeDefs = `#graphql
 
     # Presence queries
     presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
+    presences(before: String, after: String, limit: Int, offset: Int): [Presence!]!
 
     # Entity relationship queries
     entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!

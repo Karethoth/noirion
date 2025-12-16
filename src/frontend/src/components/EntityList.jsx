@@ -1,33 +1,8 @@
 import React, { useState } from 'react';
-import { gql } from '@apollo/client';
 import { useQuery, useMutation } from '@apollo/client/react';
 import Notification from './Notification';
 import './EntityList.css';
-
-const GET_ENTITIES = gql`
-  query GetEntities($entityType: String, $limit: Int, $offset: Int) {
-    entities(entityType: $entityType, limit: $limit, offset: $offset) {
-      id
-      entityType
-      displayName
-      tags
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-      }
-    }
-  }
-`;
-
-const DELETE_ENTITY = gql`
-  mutation DeleteEntity($id: ID!) {
-    deleteEntity(id: $id)
-  }
-`;
+import { GET_ENTITIES, DELETE_ENTITY } from '../graphql/entities';
 
 const EntityList = ({ onSelectEntity, userRole, onRefetchReady }) => {
   const [entityTypeFilter, setEntityTypeFilter] = useState('');

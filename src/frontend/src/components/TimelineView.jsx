@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
-import { gql } from '@apollo/client';
 import { useQuery, useMutation } from '@apollo/client/react';
 import Notification from './Notification';
 import 'leaflet/dist/leaflet.css';
 import './TimelineView.css';
 import L from 'leaflet';
+import { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT } from '../graphql/events';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -15,45 +15,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-export const GET_EVENTS = gql`
-  query GetEvents($before: String) {
-    events(before: $before, limit: 500, offset: 0) {
-      id
-      occurredAt
-      latitude
-      longitude
-      title
-      description
-    }
-  }
-`;
-
-export const CREATE_EVENT = gql`
-  mutation CreateEvent($input: CreateEventInput!) {
-    createEvent(input: $input) {
-      id
-    }
-  }
-`;
-
-export const DELETE_EVENT = gql`
-  mutation DeleteEvent($id: ID!) {
-    deleteEvent(id: $id)
-  }
-`;
-
-export const UPDATE_EVENT = gql`
-  mutation UpdateEvent($id: ID!, $input: UpdateEventInput!) {
-    updateEvent(id: $id, input: $input) {
-      id
-      occurredAt
-      latitude
-      longitude
-      title
-      description
-    }
-  }
-`;
+export { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT };
 
 function toDatetimeLocalValue(date) {
   const pad = (n) => String(n).padStart(2, '0');

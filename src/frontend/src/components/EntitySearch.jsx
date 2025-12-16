@@ -1,18 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@apollo/client/react';
-import { gql } from '@apollo/client';
+import { SEARCH_ENTITIES } from '../graphql/entities';
 import './EntitySearch.css';
-
-const SEARCH_ENTITIES = gql`
-  query SearchEntities($query: String!, $entityType: String, $limit: Int) {
-    searchEntities(query: $query, entityType: $entityType, limit: $limit) {
-      id
-      entityType
-      displayName
-      tags
-    }
-  }
-`;
 
 /**
  * EntitySearch - Autocomplete component for searching and selecting entities

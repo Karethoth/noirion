@@ -1,56 +1,11 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useLazyQuery } from '@apollo/client/react';
-import { gql } from '@apollo/client';
 import './AnnotationViewer.css';
-
-const SEARCH_ENTITIES_BY_TAG = gql`
-  query SearchEntitiesByTag($query: String!, $limit: Int) {
-    searchEntities(query: $query, limit: $limit) {
-      id
-      displayName
-      entityType
-      tags
-    }
-  }
-`;
-
-const LINK_ENTITY_TO_ANNOTATION = gql`
-  mutation LinkEntityToAnnotation(
-    $annotationId: ID!
-    $entityId: ID!
-    $relationType: String
-    $confidence: Float
-    $notes: String
-  ) {
-    linkEntityToAnnotation(
-      annotationId: $annotationId
-      entityId: $entityId
-      relationType: $relationType
-      confidence: $confidence
-      notes: $notes
-    ) {
-      id
-      entityId
-      entity {
-        id
-        displayName
-        entityType
-        tags
-      }
-      relationType
-      confidence
-      notes
-    }
-  }
-`;
-
-const UNLINK_ENTITY_FROM_ANNOTATION = gql`
-  mutation UnlinkEntityFromAnnotation($linkId: ID!) {
-    unlinkEntityFromAnnotation(linkId: $linkId) {
-      id
-    }
-  }
-`;
+import {
+  SEARCH_ENTITIES_BY_TAG,
+  LINK_ENTITY_TO_ANNOTATION,
+  UNLINK_ENTITY_FROM_ANNOTATION
+} from '../graphql/annotations';
 
 const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId, onRefetch }) => {
   const canvasRef = useRef(null);
