@@ -28,6 +28,7 @@ build
 .env.local
 .env.*.local
 
+
 .vscode/
 .idea/
 *.swp
@@ -53,3 +54,4 @@ coverage/
 *.bak
 *.old
 
+appsettings.json

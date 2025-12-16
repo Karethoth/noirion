@@ -38,8 +38,17 @@
 }
 
 .timeline-control input[type="datetime-local"],
+.timeline-control input[type="text"],
 .timeline-control input[type="range"] {
   width: 100%;
+}
+
+.timeline-control input[type="text"] {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.25);
+  color: #e0e0e0;
 }
 
 .timeline-event-form {

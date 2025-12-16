@@ -17,6 +17,7 @@ export const GET_PRESENCES = gql`
           id
           entityType
           displayName
+          tags
         }
       }
     }

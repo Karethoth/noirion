@@ -88,6 +88,8 @@ const TimelineView = ({
   const [isCreateLocationModalOpen, setIsCreateLocationModalOpen] = useState(false);
   const [isEditLocationModalOpen, setIsEditLocationModalOpen] = useState(false);
   const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
+  const [filterEntity, setFilterEntity] = useState(null); // { id, displayName, ... }
+  const [filterTagsRaw, setFilterTagsRaw] = useState('');
   const mapStyle = useMemo(() => {
     return localStorage.getItem('mapStyle') || 'day';
   }, []);
@@ -165,6 +167,41 @@ const TimelineView = ({
     });
     return items;
   }, [events, presences]);
+
+  const filterTagTokens = useMemo(() => {
+    return (filterTagsRaw || '')
+      .split(/[\s,]+/g)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((x) => x.toLowerCase());
+  }, [filterTagsRaw]);
+
+  const filteredTimelineItems = useMemo(() => {
+    const entityId = filterEntity?.id || null;
+
+    return timelineItems.filter((item) => {
+      const linkedEntities =
+        item.kind === 'event'
+          ? item.event?.entities || []
+          : item.presence?.entities || [];
+
+      if (entityId) {
+        const hasEntity = linkedEntities.some((x) => x?.entityId === entityId || x?.entity?.id === entityId);
+        if (!hasEntity) return false;
+      }
+
+      if (filterTagTokens.length > 0) {
+        const tags = linkedEntities
+          .flatMap((x) => x?.entity?.tags || [])
+          .filter(Boolean)
+          .map((t) => String(t).toLowerCase());
+        const matches = filterTagTokens.some((needle) => tags.some((tag) => tag.includes(needle)));
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [timelineItems, filterEntity?.id, filterTagTokens]);
 
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -245,12 +282,18 @@ const TimelineView = ({
   const currentCursorDate = timeCursor ? new Date(timeCursor) : null;
 
   const summaryCounts = useMemo(() => {
+    let eventsCount = 0;
+    let presencesCount = 0;
+    for (const item of filteredTimelineItems) {
+      if (item.kind === 'event') eventsCount += 1;
+      if (item.kind === 'presence') presencesCount += 1;
+    }
     return {
-      events: events.length,
-      presences: presences.length,
-      total: timelineItems.length,
+      events: eventsCount,
+      presences: presencesCount,
+      total: filteredTimelineItems.length,
     };
-  }, [events.length, presences.length, timelineItems.length]);
+  }, [filteredTimelineItems]);
 
   const handleCursorDateChange = (value) => {
     if (!value) {
@@ -572,6 +615,42 @@ const TimelineView = ({
             </label>
           </div>
         </div>
+
+        <div className="timeline-control">
+          <label>Filter by entity</label>
+          <EntitySearch
+            placeholder={filterEntity ? 'Search to change…' : 'Search entities…'}
+            onSelect={(entity) => setFilterEntity(entity)}
+          />
+          {filterEntity && (
+            <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div className="timeline-muted">
+                Filtering: <strong>{filterEntity.displayName || filterEntity.id}</strong>
+              </div>
+              <button className="timeline-secondary" onClick={() => setFilterEntity(null)}>
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="timeline-control">
+          <label htmlFor="timeline-tag-filter">Filter by tags (entity tags)</label>
+          <input
+            id="timeline-tag-filter"
+            type="text"
+            value={filterTagsRaw}
+            onChange={(e) => setFilterTagsRaw(e.target.value)}
+            placeholder="tag1, tag2"
+          />
+          {filterTagsRaw.trim() && (
+            <div style={{ marginTop: '8px' }}>
+              <button className="timeline-secondary" onClick={() => setFilterTagsRaw('')}>
+                Clear tags
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {canWrite && !isCreateEventOpen && (
@@ -825,11 +904,11 @@ const TimelineView = ({
         {(loading || presencesLoading) && <div className="timeline-muted">Loading…</div>}
         {error && <div className="timeline-error">Error (events): {error.message}</div>}
         {presencesError && <div className="timeline-error">Error (presences): {presencesError.message}</div>}
-        {!loading && !presencesLoading && !error && !presencesError && timelineItems.length === 0 && (
+        {!loading && !presencesLoading && !error && !presencesError && filteredTimelineItems.length === 0 && (
           <div className="timeline-muted">No timeline items yet.</div>
         )}
 
-        {timelineItems.map((item) => {
+        {filteredTimelineItems.map((item) => {
           if (item.kind === 'event') {
             const ev = item.event;
             const linkedNames = (ev.entities || [])
@@ -875,10 +954,19 @@ const TimelineView = ({
             })
             .filter(Boolean);
 
+          const presenceTitle = (() => {
+            const linked = (pr.entities || [])
+              .map((pe) => pe?.entity?.displayName || pe?.entity?.id || pe?.entityId)
+              .filter(Boolean);
+            if (linked.length === 1) return `Presence: ${linked[0]}`;
+            if (linked.length > 1) return `Presence: ${linked.length} entities`;
+            return 'Presence';
+          })();
+
           return (
             <div key={item.id} className="timeline-event-item">
               <div className="timeline-event-main">
-                <div className="timeline-event-title">Presence</div>
+                <div className="timeline-event-title">{presenceTitle}</div>
                 <div className="timeline-event-meta">
                   {pr.observedAt ? new Date(pr.observedAt).toLocaleString() : 'Unknown time'}
                   {pr.latitude != null && pr.longitude != null ? ` · ${formatMGRS(pr.longitude, pr.latitude)}` : ''}

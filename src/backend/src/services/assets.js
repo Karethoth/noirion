@@ -3,11 +3,182 @@ import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import exifr from 'exifr';
+import { logger } from '../utils/logger.js';
 
 export class AssetsService {
   constructor(dbPool) {
     this.dbPool = dbPool;
     this.uploadDir = path.join(process.cwd(), 'uploads');
+  }
+
+  async _syncAutoPresencesForAssetWithClient(client, assetId, userId = null) {
+    // Build observation info using manual override first, then EXIF.
+    const infoRes = await client.query(
+      `
+        SELECT
+          a.id as asset_id,
+          a.uploaded_at,
+          COALESCE(m.capture_timestamp, e.capture_timestamp, a.uploaded_at) as observed_at,
+          ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+          ST_X(COALESCE(m.gps, e.gps)) as longitude,
+          COALESCE(a.metadata, '{}'::jsonb) as metadata
+        FROM assets a
+        LEFT JOIN asset_metadata_manual m ON m.asset_id = a.id
+        LEFT JOIN asset_metadata_exif e ON e.asset_id = a.id
+        WHERE a.id = $1 AND a.deleted_at IS NULL
+      `,
+      [assetId]
+    );
+
+    if (infoRes.rows.length === 0) return;
+
+    const info = infoRes.rows[0];
+    const observedAt = info.observed_at ? new Date(info.observed_at) : null;
+    const latitude = info.latitude !== null && info.latitude !== undefined ? Number(info.latitude) : null;
+    const longitude = info.longitude !== null && info.longitude !== undefined ? Number(info.longitude) : null;
+    const hasPoint = Number.isFinite(latitude) && Number.isFinite(longitude);
+
+    // Coordinates are required for auto-presence from images.
+    if (!observedAt || Number.isNaN(observedAt.getTime()) || !hasPoint) return;
+
+    const ignoredIdsRaw = info?.metadata?.autoPresenceIgnoreEntityIds;
+    const ignored = new Set(
+      Array.isArray(ignoredIdsRaw) ? ignoredIdsRaw.map((x) => String(x)) : []
+    );
+
+    const entityRes = await client.query(
+      `
+        SELECT DISTINCT ael.entity_id
+        FROM annotations an
+        JOIN annotation_entity_links ael ON ael.annotation_id = an.id
+        WHERE an.asset_id = $1
+      `,
+      [assetId]
+    );
+
+    for (const row of entityRes.rows) {
+      const entityId = row.entity_id;
+      if (!entityId) continue;
+
+      const isIgnored = ignored.has(String(entityId));
+
+      if (isIgnored) {
+        await client.query(
+          `
+            DELETE FROM presences p
+            USING presence_entities pe
+            WHERE p.id = pe.presence_id
+              AND p.source_asset = $1
+              AND p.source_type = $2
+              AND pe.entity_id = $3
+          `,
+          [assetId, 'annotation_entity_link', entityId]
+        );
+        continue;
+      }
+
+      const existingPresence = await client.query(
+        `
+          SELECT p.id
+          FROM presences p
+          JOIN presence_entities pe ON pe.presence_id = p.id
+          WHERE p.source_asset = $1
+            AND p.source_type = $2
+            AND pe.entity_id = $3
+          LIMIT 1
+        `,
+        [assetId, 'annotation_entity_link', entityId]
+      );
+
+      if (existingPresence.rows.length === 0) {
+        const presenceInsert = await client.query(
+          `
+            INSERT INTO presences (
+              observed_at,
+              observed_by,
+              source_asset,
+              source_type,
+              geom,
+              notes,
+              metadata
+            ) VALUES (
+              $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7, $8
+            )
+            RETURNING id
+          `,
+          [
+            observedAt,
+            userId || null,
+            assetId,
+            'annotation_entity_link',
+            longitude,
+            latitude,
+            null,
+            JSON.stringify({ autoFromAsset: true })
+          ]
+        );
+
+        const presenceId = presenceInsert.rows[0].id;
+        await client.query(
+          `
+            INSERT INTO presence_entities (presence_id, entity_id, role, confidence)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (presence_id, entity_id) DO NOTHING
+          `,
+          [presenceId, entityId, null, 1.0]
+        );
+      } else {
+        // Keep any existing notes, but ensure time/geom are up to date.
+        await client.query(
+          `
+            UPDATE presences
+            SET
+              observed_at = $2,
+              geom = ST_SetSRID(ST_MakePoint($3, $4), 4326),
+              metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
+            WHERE id = $1
+          `,
+          [existingPresence.rows[0].id, observedAt, longitude, latitude]
+        );
+      }
+    }
+  }
+
+  async setAssetAutoPresenceIgnoredEntities(assetId, ignoredEntityIds = [], userId = null) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const normalized = Array.isArray(ignoredEntityIds)
+        ? ignoredEntityIds.filter(Boolean).map((x) => String(x))
+        : [];
+
+      await client.query(
+        `
+          UPDATE assets
+          SET metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{autoPresenceIgnoreEntityIds}',
+            $2::jsonb,
+            true
+          )
+          WHERE id = $1 AND deleted_at IS NULL
+        `,
+        [assetId, JSON.stringify(normalized)]
+      );
+
+      // Sync auto-presences after ignore list update.
+      await this._syncAutoPresencesForAssetWithClient(client, assetId, userId);
+
+      await client.query('COMMIT');
+      return await this.getAssetById(assetId);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error('setAssetAutoPresenceIgnoredEntities failed', err);
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async setAssetAiAnalysis(assetId, aiAnalysis) {
@@ -73,6 +244,14 @@ export class AssetsService {
           updated_at = now()`,
         params
       );
+
+      // If the asset now has time+coords, ensure auto-presences exist for any linked entities.
+      try {
+        await this._syncAutoPresencesForAssetWithClient(client, assetId, userId);
+      } catch (e) {
+        // Don't block manual metadata edits if auto-presence sync fails.
+        logger.warn('Auto-presence sync failed during updateAssetManualMetadata', e);
+      }
 
       return await this.getAssetById(assetId);
     } finally {

@@ -46,12 +46,22 @@ export const GET_IMAGE = gql`
       uploadedAt
       cameraMake
       cameraModel
+      metadata
       aiAnalysis {
         caption
         licensePlates
         model
         createdAt
       }
+    }
+  }
+`;
+
+export const SET_IMAGE_AUTO_PRESENCE_IGNORES = gql`
+  mutation SetImageAutoPresenceIgnoredEntities($imageId: ID!, $ignoredEntityIds: [ID!]!) {
+    setImageAutoPresenceIgnoredEntities(imageId: $imageId, ignoredEntityIds: $ignoredEntityIds) {
+      id
+      metadata
     }
   }
 `;

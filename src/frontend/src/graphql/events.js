@@ -18,6 +18,7 @@ export const GET_EVENTS = gql`
           id
           entityType
           displayName
+          tags
         }
       }
     }

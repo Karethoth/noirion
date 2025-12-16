@@ -166,6 +166,17 @@ const imageResolvers = {
       );
     },
 
+    setImageAutoPresenceIgnoredEntities: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.setAssetAutoPresenceIgnoredEntities(
+        args.imageId,
+        args.ignoredEntityIds || [],
+        context.userId
+      );
+    },
+
     analyzeImage: async (parent, args, context) => {
       const persist = args.persist !== false;
       requirePermission(context.user, persist ? 'write' : 'read');

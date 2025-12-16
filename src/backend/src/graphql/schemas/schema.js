@@ -58,6 +58,7 @@ export const typeDefs = `#graphql
     uploadImages(files: [Upload!]!): [Image!]!
     deleteImage(id: ID!): Boolean!
     updateImage(id: ID!, input: UpdateImageInput!): Image!
+    setImageAutoPresenceIgnoredEntities(imageId: ID!, ignoredEntityIds: [ID!]!): Image!
 
     analyzeImage(id: ID!, model: String, persist: Boolean = true): ImageAIAnalysis!
     analyzeAnnotation(annotationId: ID!, regionId: ID, model: String, persist: Boolean = true): AnnotationAIAnalysis!

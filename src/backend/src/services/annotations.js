@@ -353,11 +353,13 @@ export class AnnotationService {
           SELECT
             a.asset_id,
             ass.uploaded_at,
-            ex.capture_timestamp,
-            ST_Y(ex.gps) as latitude,
-            ST_X(ex.gps) as longitude
+            COALESCE(m.capture_timestamp, ex.capture_timestamp, ass.uploaded_at) as observed_at,
+            ST_Y(COALESCE(m.gps, ex.gps)) as latitude,
+            ST_X(COALESCE(m.gps, ex.gps)) as longitude,
+            COALESCE(ass.metadata, '{}'::jsonb) as asset_metadata
           FROM annotations a
           JOIN assets ass ON ass.id = a.asset_id
+          LEFT JOIN asset_metadata_manual m ON m.asset_id = ass.id
           LEFT JOIN asset_metadata_exif ex ON ex.asset_id = ass.id
           WHERE a.id = $1
         `,
@@ -367,7 +369,11 @@ export class AnnotationService {
       if (infoResult.rows.length > 0) {
         const info = infoResult.rows[0];
         const assetId = info.asset_id;
-        const observedAt = info.capture_timestamp || info.uploaded_at;
+        const observedAt = info.observed_at;
+
+        const ignoredIdsRaw = info?.asset_metadata?.autoPresenceIgnoreEntityIds;
+        const ignored = new Set(Array.isArray(ignoredIdsRaw) ? ignoredIdsRaw.map((x) => String(x)) : []);
+        const isIgnored = ignored.has(String(entityId));
 
         const existingPresence = await client.query(
           `
@@ -382,10 +388,12 @@ export class AnnotationService {
           [assetId, 'annotation_entity_link', entityId]
         );
 
-        if (existingPresence.rows.length === 0 && observedAt) {
-          const hasPoint = info.latitude !== null && info.latitude !== undefined && info.longitude !== null && info.longitude !== undefined;
-          const geomClause = hasPoint ? 'ST_SetSRID(ST_MakePoint($5, $6), 4326)' : 'NULL';
+        const lat = info.latitude !== null && info.latitude !== undefined ? Number(info.latitude) : null;
+        const lng = info.longitude !== null && info.longitude !== undefined ? Number(info.longitude) : null;
+        const hasPoint = Number.isFinite(lat) && Number.isFinite(lng);
 
+        // Only create auto-presence when we have both time and coordinates.
+        if (!isIgnored && existingPresence.rows.length === 0 && observedAt && hasPoint) {
           const presenceInsert = await client.query(
             `
               INSERT INTO presences (
@@ -397,7 +405,7 @@ export class AnnotationService {
                 notes,
                 metadata
               ) VALUES (
-                $1, $2, $3, $4, ${geomClause}, $7, $8
+                $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7, $8
               )
               RETURNING id
             `,
@@ -406,10 +414,10 @@ export class AnnotationService {
               observedBy || null,
               assetId,
               'annotation_entity_link',
-              hasPoint ? info.longitude : null,
-              hasPoint ? info.latitude : null,
+              lng,
+              lat,
               notes || null,
-              JSON.stringify({ annotationId, entityId, linkId: link.id })
+              JSON.stringify({ annotationId, entityId, linkId: link.id, autoFromAnnotation: true })
             ]
           );
 
@@ -421,6 +429,32 @@ export class AnnotationService {
               ON CONFLICT (presence_id, entity_id) DO NOTHING
             `,
             [presenceId, entityId, relationType || null, confidence || 1.0]
+          );
+        }
+
+        // If it exists and we now have coords/time, keep it updated.
+        if (!isIgnored && existingPresence.rows.length > 0 && observedAt && hasPoint) {
+          await client.query(
+            `
+              UPDATE presences
+              SET
+                observed_at = $2,
+                geom = ST_SetSRID(ST_MakePoint($3, $4), 4326),
+                metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAnnotation}', 'true'::jsonb, true)
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id, observedAt, lng, lat]
+          );
+        }
+
+        // If ignored, ensure any existing auto presence is removed.
+        if (isIgnored && existingPresence.rows.length > 0) {
+          await client.query(
+            `
+              DELETE FROM presences
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id]
           );
         }
       }
@@ -448,6 +482,50 @@ export class AnnotationService {
       if (result.rows.length === 0) {
         throw new Error('Entity link not found');
       }
+
+      // If this was the last link for (asset, entity), delete the auto presence.
+      try {
+        const deleted = result.rows[0];
+        const annotationId = deleted.annotation_id;
+        const entityId = deleted.entity_id;
+
+        const assetRes = await client.query(
+          `SELECT asset_id FROM annotations WHERE id = $1`,
+          [annotationId]
+        );
+        const assetId = assetRes.rows[0]?.asset_id;
+
+        if (assetId && entityId) {
+          const remainingRes = await client.query(
+            `
+              SELECT 1
+              FROM annotations an
+              JOIN annotation_entity_links ael ON ael.annotation_id = an.id
+              WHERE an.asset_id = $1 AND ael.entity_id = $2
+              LIMIT 1
+            `,
+            [assetId, entityId]
+          );
+
+          if (remainingRes.rows.length === 0) {
+            await client.query(
+              `
+                DELETE FROM presences p
+                USING presence_entities pe
+                WHERE p.id = pe.presence_id
+                  AND p.source_asset = $1
+                  AND p.source_type = $2
+                  AND pe.entity_id = $3
+              `,
+              [assetId, 'annotation_entity_link', entityId]
+            );
+          }
+        }
+      } catch (e) {
+        // Best-effort cleanup; don't fail unlink on timeline cleanup.
+        logger.warn('Presence cleanup failed on unlinkEntityFromAnnotation', e);
+      }
+
       return this.formatEntityLink(result.rows[0]);
     } catch (error) {
       logger.error('Error unlinking entity from annotation:', error);
