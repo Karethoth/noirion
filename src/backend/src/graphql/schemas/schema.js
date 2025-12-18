@@ -9,6 +9,7 @@ export const typeDefs = `#graphql
     images: [Image!]!
     image(id: ID!): Image
     imagesInArea(bounds: BoundsInput!): [Image!]!
+    imagesByEntity(entityId: ID!, limit: Int, offset: Int): [Image!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
 
@@ -19,12 +20,36 @@ export const typeDefs = `#graphql
 
     # Presence queries
     presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
+    presences(before: String, after: String, limit: Int, offset: Int): [Presence!]!
 
     # Entity relationship queries
     entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!
 
     # Events
     events(before: String, after: String, limit: Int, offset: Int): [Event!]!
+    eventsByEntity(entityId: ID!, before: String, after: String, limit: Int, offset: Int): [Event!]!
+
+    projectSettings: ProjectSettings!
+    lmStudioModels(visionOnly: Boolean = false): [LmStudioModel!]!
+    lmStudioTestVision(modelId: String!): LmStudioVisionTestResult!
+
+    annotationAiAnalysisRuns(annotationId: ID, limit: Int = 20): [AnnotationAIAnalysisRun!]!
+  }
+
+  type AnnotationAIAnalysisRun {
+    id: ID!
+    annotationId: ID!
+    assetId: ID!
+    assetFilename: String
+    regionId: ID
+    createdAt: String!
+    createdBy: ID
+    model: String
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    cropUrl: String
+    cropDebug: JSON
   }
 
   type Mutation {
@@ -35,6 +60,12 @@ export const typeDefs = `#graphql
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
     deleteImage(id: ID!): Boolean!
+    updateImage(id: ID!, input: UpdateImageInput!): Image!
+    setImageAutoPresenceIgnoredEntities(imageId: ID!, ignoredEntityIds: [ID!]!): Image!
+
+    analyzeImage(id: ID!, model: String, persist: Boolean = true): ImageAIAnalysis!
+    analyzeAnnotation(annotationId: ID!, regionId: ID, model: String, persist: Boolean = true): AnnotationAIAnalysis!
+    analyzeAnnotationDraft(assetId: ID!, input: AddRegionInput!, model: String): AnnotationAIAnalysis!
 
     # Annotation mutations
     createAnnotation(input: CreateAnnotationInput!): Annotation!
@@ -54,10 +85,12 @@ export const typeDefs = `#graphql
 
     # Entity-Annotation linking mutations
     linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    linkVehiclePlateToAnnotation(annotationId: ID!, plate: String!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
     unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
 
     # Presence mutations
     createPresence(input: CreatePresenceInput!): Presence!
+    deletePresence(id: ID!): Boolean!
 
     # Entity relationship mutations
     createEntityLink(input: CreateEntityLinkInput!): EntityLink!
@@ -67,8 +100,42 @@ export const typeDefs = `#graphql
     createEvent(input: CreateEventInput!): Event!
     updateEvent(id: ID!, input: UpdateEventInput!): Event!
     deleteEvent(id: ID!): Boolean!
+
+    updateProjectSettings(input: UpdateProjectSettingsInput!): ProjectSettings!
+    recalculateProjectHomeLocation: ProjectSettings!
+
+    # Dev/admin only
+    devResetDatabase(confirm: String!): Boolean!
   }
 
+  type ProjectSettings {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean!
+      aiEnabled: Boolean!
+      lmStudioBaseUrl: String!
+      lmStudioModel: String
+  }
+
+  input UpdateProjectSettingsInput {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean
+      aiEnabled: Boolean
+      lmStudioBaseUrl: String
+      lmStudioModel: String
+  }
+
+  type LmStudioModel {
+    id: String!
+    isVision: Boolean!
+  }
+
+  type LmStudioVisionTestResult {
+    ok: Boolean!
+    isVision: Boolean!
+    message: String
+  }
   type AuthPayload {
     token: String!
     user: User!
@@ -89,6 +156,7 @@ export const typeDefs = `#graphql
     id: ID!
     filename: String!
     originalName: String!
+    displayName: String
     filePath: String!
     sha256Hash: String!
     fileSize: Int!
@@ -141,8 +209,40 @@ export const typeDefs = `#graphql
     exifData: JSON
     metadata: JSON
 
+    # AI-derived metadata
+    aiAnalysis: ImageAIAnalysis
+
     # Relationships
     annotations: [Annotation!]!
+  }
+
+  input UpdateImageInput {
+    displayName: String
+    latitude: Float
+    longitude: Float
+    altitude: Float
+    captureTimestamp: String
+  }
+
+  type ImageAIAnalysis {
+    caption: String
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
+  }
+
+  type AnnotationAIAnalysis {
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
+     runId: ID
+     cropUrl: String
+     cropDataUrl: String
+     cropDebug: JSON
   }
 
   input BoundsInput {
@@ -173,6 +273,7 @@ export const typeDefs = `#graphql
     createdAt: String!
     updatedAt: String!
     metadata: JSON
+    aiAnalysis: AnnotationAIAnalysis
   }
 
   type AnnotationRegion {
@@ -267,6 +368,22 @@ export const typeDefs = `#graphql
     createdBy: ID
     createdAt: String
     metadata: JSON
+    entities: [EventEntity!]!
+  }
+
+  type EventEntity {
+
+    eventId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input EventEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
   }
 
   input CreateEventInput {
@@ -276,6 +393,7 @@ export const typeDefs = `#graphql
     title: String!
     description: String
     metadata: JSON
+    entities: [EventEntityInput!]
   }
 
   input UpdateEventInput {
@@ -285,6 +403,7 @@ export const typeDefs = `#graphql
     title: String!
     description: String
     metadata: JSON
+    entities: [EventEntityInput!]
   }
 
   input CreateEntityLinkInput {

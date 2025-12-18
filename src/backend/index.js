@@ -4,7 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import { gql } from 'graphql-tag';
 import * as GraphQLUpload from 'graphql-upload-minimal';
-import { pool, testConnection } from './src/db/connection.js';
+import { pool, testConnection, getPoolStats } from './src/db/connection.js';
 import userResolvers from './src/graphql/resolvers/user.resolver.js';
 import imageResolvers from './src/graphql/resolvers/image.resolver.js';
 import annotationResolvers from './src/graphql/resolvers/annotation.resolver.js';
@@ -12,12 +12,31 @@ import entityResolvers from './src/graphql/resolvers/entity.resolver.js';
 import presenceResolvers from './src/graphql/resolvers/presence.resolver.js';
 import entityLinkResolvers from './src/graphql/resolvers/entity-link.resolver.js';
 import eventResolvers from './src/graphql/resolvers/event.resolver.js';
+import projectSettingsResolvers from './src/graphql/resolvers/project-settings.resolver.js';
+import adminResolvers from './src/graphql/resolvers/admin.resolver.js';
+import lmStudioResolvers from './src/graphql/resolvers/lmstudio.resolver.js';
 import { typeDefs } from './src/graphql/schemas/schema.js';
 import GraphQLJSON from 'graphql-type-json';
 import { getUserFromAuthHeader } from './src/utils/auth.js';
 import { runMigrations } from './scripts/run-migrations.js';
+import { createLoaders } from './src/graphql/loaders.js';
+import { EntityService } from './src/services/entities.js';
 
 const startTime = Date.now();
+
+const DEBUG_HTTP = ['1', 'true', 'yes', 'on'].includes(String(process.env.DEBUG_HTTP || '').toLowerCase());
+const DEBUG_GRAPHQL = ['1', 'true', 'yes', 'on'].includes(String(process.env.DEBUG_GRAPHQL || '').toLowerCase());
+
+function newRequestId() {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function summarizeGraphQLBody(body) {
+  if (!body || typeof body !== 'object') return { operationName: null, hasQuery: false };
+  const operationName = typeof body.operationName === 'string' ? body.operationName : null;
+  const hasQuery = typeof body.query === 'string' ? body.query.length > 0 : !!body.query;
+  return { operationName, hasQuery };
+}
 
 async function initializeDatabase() {
   const connected = await testConnection();
@@ -52,7 +71,9 @@ const resolvers = {
     ...entityResolvers.Query,
     ...presenceResolvers.Query,
     ...entityLinkResolvers.Query,
-    ...eventResolvers.Query
+    ...eventResolvers.Query,
+    ...projectSettingsResolvers.Query,
+    ...lmStudioResolvers.Query
   },
   Mutation: {
     ...userResolvers.Mutation,
@@ -61,14 +82,18 @@ const resolvers = {
     ...entityResolvers.Mutation,
     ...presenceResolvers.Mutation,
     ...entityLinkResolvers.Mutation,
-    ...eventResolvers.Mutation
+    ...eventResolvers.Mutation,
+    ...projectSettingsResolvers.Mutation,
+    ...adminResolvers.Mutation
   },
   Image: imageResolvers.Image,
   Annotation: annotationResolvers.Annotation,
   Entity: entityResolvers.Entity,
   Presence: presenceResolvers.Presence,
   PresenceEntity: presenceResolvers.PresenceEntity,
-  EntityLink: entityLinkResolvers.EntityLink
+  EntityLink: entityLinkResolvers.EntityLink,
+  Event: eventResolvers.Event,
+  EventEntity: eventResolvers.EventEntity
 };
 
 async function startServer() {
@@ -86,11 +111,18 @@ async function startServer() {
   await server.start();
 
   // Apply CORS with proper configuration
+  // NOTE: Browsers reject `Access-Control-Allow-Origin: *` when `Access-Control-Allow-Credentials: true`.
+  // Using `origin: true` reflects the request origin, keeping CORS compatible for local dev.
   app.use(cors({
-    origin: '*',
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'apollo-require-preflight', 'x-apollo-operation-name'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'apollo-require-preflight',
+      'x-apollo-operation-name',
+    ],
   }));
 
   // Serve uploaded files statically
@@ -99,10 +131,25 @@ async function startServer() {
   // Parse JSON for non-file requests
   app.use(express.json());
 
+  // Attach a request id for easier correlation in logs.
+  app.use((req, res, next) => {
+    req.__requestId = newRequestId();
+    res.setHeader('x-request-id', req.__requestId);
+    if (DEBUG_HTTP) {
+      const start = Date.now();
+      res.on('finish', () => {
+        const ms = Date.now() - start;
+         
+        console.log(`[${req.__requestId}] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms)`);
+      });
+    }
+    next();
+  });
+
   // Apply GraphQL Upload middleware BEFORE the GraphQL endpoint
   app.use(
     '/graphql',
-    GraphQLUpload.graphqlUploadExpress({ maxFileSize: 100000000, maxFiles: 10 })
+    GraphQLUpload.graphqlUploadExpress({ maxFileSize: 2147483648, maxFiles: 100 })
   );
 
   // Handle OPTIONS requests for CORS preflight
@@ -112,6 +159,35 @@ async function startServer() {
 
   // Apply Apollo Server middleware manually
   app.post('/graphql', async (req, res) => {
+    const requestId = req.__requestId || newRequestId();
+    const start = Date.now();
+    const { operationName, hasQuery } = summarizeGraphQLBody(req.body);
+    const hasAuthHeader = typeof req.headers.authorization === 'string' && req.headers.authorization.startsWith('Bearer ');
+
+    let watchdog = null;
+    if (DEBUG_GRAPHQL) {
+      try {
+        const stats = await getPoolStats();
+         
+        console.log(`[${requestId}] dbPool stats total=${stats.total} idle=${stats.idle} waiting=${stats.waiting}`);
+      } catch (e) {
+         
+        console.warn(`[${requestId}] dbPool stats unavailable:`, e?.message || e);
+      }
+
+       
+      console.log(
+        `[${requestId}] GraphQL request start op=${operationName || 'unknown'} hasQuery=${hasQuery} auth=${hasAuthHeader}`
+      );
+
+      watchdog = setTimeout(() => {
+         
+        console.warn(
+          `[${requestId}] GraphQL still running after 15s op=${operationName || 'unknown'} (possible DB wait/hang)`
+        );
+      }, 15000);
+    }
+
     try {
       // Convert Express headers to Headers object
       const headers = new Headers();
@@ -136,12 +212,23 @@ async function startServer() {
           const authHeader = req.headers.authorization;
           const user = getUserFromAuthHeader(authHeader);
 
+          if (DEBUG_GRAPHQL) {
+             
+            console.log(
+              `[${requestId}] GraphQL context userId=${user?.userId || 'null'} role=${user?.role || 'null'}`
+            );
+          }
+
+          const entityService = new EntityService(pool);
+          const loaders = createLoaders(pool, { entityService });
+
           return {
             dbPool: pool,
             req,
             user,
             userId: user?.userId || null,
-            userRole: user?.role || null
+            userRole: user?.role || null,
+            loaders,
           };
         },
       });
@@ -159,15 +246,35 @@ async function startServer() {
         }
         res.end();
       }
+
+      if (DEBUG_GRAPHQL) {
+        const ms = Date.now() - start;
+         
+        console.log(
+          `[${requestId}] GraphQL request end op=${operationName || 'unknown'} status=${httpGraphQLResponse.status || 200} (${ms}ms)`
+        );
+      }
     } catch (error) {
       console.error('GraphQL error:', error);
       res.status(500).json({ errors: [{ message: error.message }] });
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
     }
   });
 
   // Health check endpoint
   app.get('/health', async (req, res) => {
     try {
+      if (DEBUG_HTTP) {
+        try {
+          const stats = await getPoolStats();
+           
+          console.log(`[${req.__requestId || 'health'}] /health dbPool total=${stats.total} idle=${stats.idle} waiting=${stats.waiting}`);
+        } catch {
+          // ignore
+        }
+      }
+
       const client = await pool.connect();
       const result = await client.query('SELECT NOW()');
       client.release();

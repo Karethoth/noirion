@@ -98,6 +98,250 @@
   backdrop-filter: blur(4px);
 }
 
+/* Map edit panel */
+.map-edit-panel {
+  position: absolute;
+  top: 64px;
+  left: 56px;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 32px));
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+/* Map filter panel reuses map-edit-panel styling, just positioned on the right. */
+.map-filter-panel {
+  left: auto;
+  right: 16px;
+  max-height: calc(100vh - 32px);
+  /* EntitySearch renders a dropdown that would otherwise be clipped by overflow:hidden. */
+  overflow: visible;
+}
+
+.map-filter-panel .map-edit-body {
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+}
+
+.map-edit-header {
+  padding: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.map-edit-toggle {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.03);
+  color: #333;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.map-edit-toggle.active {
+  background: rgba(0, 123, 255, 0.15);
+  border-color: rgba(0, 123, 255, 0.35);
+}
+
+.map-edit-body {
+  padding: 10px;
+}
+
+.map-edit-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.map-edit-label {
+  width: 90px;
+  font-size: 12px;
+  color: #555;
+  font-weight: 600;
+}
+
+.map-edit-input,
+.map-edit-select {
+  flex: 1;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+}
+
+.map-edit-hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.map-edit-muted {
+  color: #888;
+}
+
+.map-edit-coords {
+  font-size: 12px;
+  color: #333;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 6px 10px;
+  border-radius: 6px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-edit-coords-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-edit-coords-clear {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: rgba(255, 255, 255, 0.7);
+  color: #333;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.map-edit-coords-clear:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.map-edit-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.map-edit-primary {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #1a1a2e;
+  color: white;
+  font-weight: 700;
+}
+
+.map-edit-secondary {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+  background: white;
+  color: #333;
+  font-weight: 700;
+}
+
+.map-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.map-edit-chip {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Overlay theming: map style drives UI theme */
+.map-ui-dark .map-style-toggle,
+.map-ui-dark .map-info-overlay,
+.map-ui-dark .map-edit-panel {
+  background: rgba(42, 42, 46, 0.95);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.map-ui-dark .map-style-button {
+  color: #b0b0b0;
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.map-ui-dark .map-style-button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-info-overlay {
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-info-overlay strong {
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-edit-toggle {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-edit-label {
+  color: #c0c0c0;
+}
+
+.map-ui-dark .map-edit-hint,
+.map-ui-dark .map-edit-muted {
+  color: #b0b0b0;
+}
+
+.map-ui-dark .map-edit-input,
+.map-ui-dark .map-edit-select {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.map-ui-dark .map-edit-coords {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-edit-coords-clear {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e0e0e0;
+}
+
+.map-ui-dark .map-edit-coords-clear:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.map-ui-dark .map-edit-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.map-ui-dark .map-edit-chip {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #e0e0e0;
+}
+
 .map-style-button {
   padding: 8px 16px;
   border: none;
@@ -257,6 +501,62 @@
   left: -2px;
   font-size: 10px;
   opacity: 0.7;
+}
+
+/* Custom markers for events/presences/locations */
+.custom-event-marker,
+.custom-presence-marker,
+.custom-location-marker {
+  background: transparent;
+  border: none;
+}
+
+/* Presence connection lines */
+.presence-path {
+  stroke: #10b981;
+}
+
+/* Temporary marker for edit-mode click placement */
+.custom-draft-marker {
+  background: transparent;
+  border: none;
+}
+
+.draft-marker-inner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(220, 53, 69, 0.95);
+  background: rgba(220, 53, 69, 0.15);
+  color: rgba(220, 53, 69, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.presence-marker-inner,
+.location-marker-inner {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 2px solid white;
+  color: white;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.presence-marker-inner {
+  background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+}
+
+.location-marker-inner {
+  background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
 }
 
 /* Custom event marker */

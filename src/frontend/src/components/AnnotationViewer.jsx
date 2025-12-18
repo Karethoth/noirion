@@ -1,58 +1,19 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useLazyQuery } from '@apollo/client/react';
-import { gql } from '@apollo/client';
 import './AnnotationViewer.css';
-
-const SEARCH_ENTITIES_BY_TAG = gql`
-  query SearchEntitiesByTag($query: String!, $limit: Int) {
-    searchEntities(query: $query, limit: $limit) {
-      id
-      displayName
-      entityType
-      tags
-    }
-  }
-`;
-
-const LINK_ENTITY_TO_ANNOTATION = gql`
-  mutation LinkEntityToAnnotation(
-    $annotationId: ID!
-    $entityId: ID!
-    $relationType: String
-    $confidence: Float
-    $notes: String
-  ) {
-    linkEntityToAnnotation(
-      annotationId: $annotationId
-      entityId: $entityId
-      relationType: $relationType
-      confidence: $confidence
-      notes: $notes
-    ) {
-      id
-      entityId
-      entity {
-        id
-        displayName
-        entityType
-        tags
-      }
-      relationType
-      confidence
-      notes
-    }
-  }
-`;
-
-const UNLINK_ENTITY_FROM_ANNOTATION = gql`
-  mutation UnlinkEntityFromAnnotation($linkId: ID!) {
-    unlinkEntityFromAnnotation(linkId: $linkId) {
-      id
-    }
-  }
-`;
+import Notification from './Notification';
+import { useAiConfig } from '../utils/aiConfig';
+import {
+  SEARCH_ENTITIES_BY_TAG,
+  LINK_ENTITY_TO_ANNOTATION,
+  UNLINK_ENTITY_FROM_ANNOTATION,
+  ANALYZE_ANNOTATION,
+  ANALYZE_ANNOTATION_DRAFT,
+  GET_ANNOTATION_AI_ANALYSIS_RUNS
+} from '../graphql/annotations';
 
 const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId, onRefetch }) => {
+  const { enabled: aiEnabled, model: aiModel } = useAiConfig();
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
   const imageContainerRef = useRef(null);
@@ -61,6 +22,18 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   // Ensure image src is absolute if needed
   const backendUrl = import.meta.env.VITE_API_URL;
   const imageSrc = image?.filePath?.startsWith('http') ? image.filePath : `${backendUrl}${image.filePath || ''}`;
+
+  const getCropPreviewSrc = useCallback(
+    (analysis) => {
+      if (!analysis) return null;
+      if (analysis.cropDataUrl && typeof analysis.cropDataUrl === 'string') return analysis.cropDataUrl;
+      if (analysis.cropUrl && typeof analysis.cropUrl === 'string') {
+        return analysis.cropUrl.startsWith('http') ? analysis.cropUrl : `${backendUrl}${analysis.cropUrl}`;
+      }
+      return null;
+    },
+    [backendUrl]
+  );
 
   const [currentTool, setCurrentTool] = useState('select');
   const [drawingRegion, setDrawingRegion] = useState(null);
@@ -74,6 +47,19 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const [entitySuggestions, setEntitySuggestions] = useState([]);
   const [pendingAnnotationData, setPendingAnnotationData] = useState(null);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [showAiHistory, setShowAiHistory] = useState(false);
+
+  const [notification, setNotification] = useState(null);
+  const showNotification = useCallback((message, type = 'info', duration = 3000) => {
+    setNotification({ message, type, duration });
+  }, []);
+
+  const [fetchAiHistory, { data: aiHistoryData, loading: aiHistoryLoading, error: aiHistoryError }] = useLazyQuery(
+    GET_ANNOTATION_AI_ANALYSIS_RUNS,
+    { fetchPolicy: 'network-only' }
+  );
 
   // Zoom and pan state
   const [scale, setScale] = useState(1);
@@ -81,6 +67,17 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState(null);
   const hasInitializedZoom = useRef(false);
+
+  // When switching images (common in Asset Editor), reset viewer state so we don't
+  // keep pan/zoom from the previous image.
+  useEffect(() => {
+    setImageLoaded(false);
+    hasInitializedZoom.current = false;
+    setScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setIsPanning(false);
+    setPanStart(null);
+  }, [imageSrc]);
 
   // Entity search query
   const [searchEntitiesByTag] = useLazyQuery(SEARCH_ENTITIES_BY_TAG);
@@ -104,6 +101,147 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     }
   });
 
+  const [analyzeAnnotation] = useMutation(ANALYZE_ANNOTATION);
+  const [analyzeAnnotationDraft] = useMutation(ANALYZE_ANNOTATION_DRAFT);
+
+  useEffect(() => {
+    if (!aiEnabled) return;
+    if (!showAiHistory) return;
+    if (!selectedRegion?.id) return;
+    fetchAiHistory({ variables: { annotationId: selectedRegion.id, limit: 10 } });
+  }, [aiEnabled, showAiHistory, selectedRegion?.id, fetchAiHistory]);
+
+  useEffect(() => {
+    if (aiEnabled) return;
+    setShowAiHistory(false);
+    setAiResult(null);
+  }, [aiEnabled]);
+
+  const formatAiSuggestionIntoDescription = useCallback((currentText, analysis) => {
+    const base = (currentText || '').trim();
+    const lines = base ? [base] : [];
+
+    if (analysis?.caption) {
+      lines.push(analysis.caption.trim());
+    }
+
+    const tagTokens = [];
+
+    if (Array.isArray(analysis?.tags)) {
+      for (const t of analysis.tags) {
+        if (typeof t !== 'string') continue;
+        const cleaned = t.trim();
+        if (!cleaned) continue;
+        tagTokens.push(`#${cleaned.replace(/^#/, '')}`);
+      }
+    }
+
+    if (Array.isArray(analysis?.licensePlates)) {
+      for (const p of analysis.licensePlates) {
+        if (typeof p !== 'string') continue;
+        const cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+        if (!cleaned) continue;
+        tagTokens.push(`#license_plate:${cleaned}`);
+      }
+    }
+
+    if (tagTokens.length > 0) {
+      lines.push(tagTokens.join(' '));
+    }
+
+    return lines.join('\n').trim();
+  }, []);
+
+  const handleAnalyzeSelectedAnnotation = useCallback(async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
+    if (!selectedRegion) return;
+    const regionId = selectedRegion?.regions?.[0]?.id || null;
+
+    setAiAnalyzing(true);
+    setAiResult(null);
+    try {
+      const resp = await analyzeAnnotation({
+        variables: {
+          annotationId: selectedRegion.id,
+          regionId,
+          model: aiModel || null,
+          persist: false,
+        },
+      });
+
+      const analysis = resp?.data?.analyzeAnnotation || null;
+      setAiResult(analysis);
+
+      if (showAiHistory && selectedRegion?.id) {
+        fetchAiHistory({ variables: { annotationId: selectedRegion.id, limit: 10 } });
+      }
+
+      if (!readOnly && analysis) {
+        const newText = formatAiSuggestionIntoDescription(editingDescription ? editDescValue : (selectedRegion.description || ''), analysis);
+        setEditDescValue(newText);
+        setEditingDescription(true);
+      }
+    } catch (error) {
+      console.error('Analyze annotation failed:', error);
+      showNotification('Failed to analyze annotation', 'error');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [
+    aiEnabled,
+    aiModel,
+    selectedRegion,
+    analyzeAnnotation,
+    readOnly,
+    editingDescription,
+    editDescValue,
+    formatAiSuggestionIntoDescription,
+    showAiHistory,
+    fetchAiHistory,
+    showNotification,
+  ]);
+
+  const handleAnalyzeDraftAnnotation = useCallback(async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
+    if (!pendingRegion) return;
+    if (!image?.id) return;
+
+    setAiAnalyzing(true);
+    setAiResult(null);
+    try {
+      const resp = await analyzeAnnotationDraft({
+        variables: {
+          assetId: image.id,
+          input: {
+            shapeType: pendingRegion.shapeType,
+            coordinates: pendingRegion.coordinates,
+            style: pendingRegion.style,
+          },
+          model: aiModel || null,
+        },
+      });
+
+      const analysis = resp?.data?.analyzeAnnotationDraft || null;
+      setAiResult(analysis);
+
+      if (!readOnly && analysis) {
+        const newText = formatAiSuggestionIntoDescription(description, analysis);
+        setDescription(newText);
+      }
+    } catch (error) {
+      console.error('Analyze draft annotation failed:', error);
+      showNotification('Failed to analyze annotation', 'error');
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [aiEnabled, aiModel, pendingRegion, image?.id, analyzeAnnotationDraft, readOnly, description, formatAiSuggestionIntoDescription, showNotification]);
+
   const handleUnlinkEntity = async (linkId) => {
     try {
       await unlinkEntity({
@@ -113,7 +251,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       });
     } catch (error) {
       console.error('Error unlinking entity:', error);
-      alert('Failed to unlink entity');
+      showNotification('Failed to unlink entity', 'error');
     }
   };
 
@@ -351,33 +489,60 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     const canvas = canvasRef.current;
     const img = imageRef.current;
 
+    let retryTimer = null;
+    let tries = 0;
+
     // Set canvas size to match the natural image size
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
 
     // Fit image to view on initial load only (not on every re-render)
-    if (!hasInitializedZoom.current) {
+    // Note: during first mount, the container can briefly measure as 0x0 which would
+    // produce a negative scale. We retry a few times until layout stabilizes.
+    const tryInitializeZoom = () => {
+      if (hasInitializedZoom.current) return;
+
       const container = imageContainerRef.current;
-      if (container && img.naturalWidth && img.naturalHeight) {
-        const containerRect = container.getBoundingClientRect();
-        const scaleX = (containerRect.width - 40) / img.naturalWidth;
-        const scaleY = (containerRect.height - 40) / img.naturalHeight;
-        const fitScale = Math.min(scaleX, scaleY, 1);
+      if (!container || !img.naturalWidth || !img.naturalHeight) return;
 
-        setScale(fitScale);
-
-        const scaledWidth = img.naturalWidth * fitScale;
-        const scaledHeight = img.naturalHeight * fitScale;
-        setPanOffset({
-          x: (containerRect.width - scaledWidth) / 2,
-          y: (containerRect.height - scaledHeight) / 2
-        });
-
-        hasInitializedZoom.current = true;
+      const containerRect = container.getBoundingClientRect();
+      if (containerRect.width <= 60 || containerRect.height <= 60) {
+        tries += 1;
+        if (tries < 25) {
+          retryTimer = window.setTimeout(tryInitializeZoom, 50);
+        }
+        return;
       }
+
+      const availableWidth = Math.max(containerRect.width - 40, 1);
+      const availableHeight = Math.max(containerRect.height - 40, 1);
+
+      const scaleX = availableWidth / img.naturalWidth;
+      const scaleY = availableHeight / img.naturalHeight;
+      const fitScale = Math.max(0.05, Math.min(scaleX, scaleY, 1));
+
+      setScale(fitScale);
+
+      const scaledWidth = img.naturalWidth * fitScale;
+      const scaledHeight = img.naturalHeight * fitScale;
+      setPanOffset({
+        x: (containerRect.width - scaledWidth) / 2,
+        y: (containerRect.height - scaledHeight) / 2
+      });
+
+      hasInitializedZoom.current = true;
+    };
+
+    if (!hasInitializedZoom.current) {
+      tryInitializeZoom();
     }
 
     redrawAnnotations();
+    return () => {
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
   }, [imageLoaded, redrawAnnotations]);
 
   // Get coordinates in image space (accounting for zoom/pan)
@@ -400,8 +565,9 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   };
 
   // Mouse wheel for zoom
-  const handleWheel = (e) => {
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation();
     const delta = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = Math.max(0.2, Math.min(5, scale * delta));
 
@@ -414,14 +580,32 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
       // Adjust pan offset to zoom towards mouse
       const scaleRatio = newScale / scale;
-      setPanOffset({
-        x: mouseX - (mouseX - panOffset.x) * scaleRatio,
-        y: mouseY - (mouseY - panOffset.y) * scaleRatio
-      });
+      setPanOffset((prev) => ({
+        x: mouseX - (mouseX - prev.x) * scaleRatio,
+        y: mouseY - (mouseY - prev.y) * scaleRatio
+      }));
     }
 
     setScale(newScale);
-  };
+  }, [scale]);
+
+  // Ensure wheel preventDefault actually works (React wheel handlers may be passive in some setups).
+  useEffect(() => {
+    const el = imageContainerRef.current;
+    if (!el) return;
+
+    const onWheelNative = (e) => {
+      // Stop page scrolling while zooming.
+      e.preventDefault();
+      e.stopPropagation();
+      handleWheel(e);
+    };
+
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheelNative);
+    };
+  }, [handleWheel]);
 
   // Pan handling
   const handlePanMouseDown = (e) => {
@@ -540,6 +724,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       if (!stillExists) {
         _setSelectedRegion(null);
         setEditingDescription(false);
+        setAiResult(null);
       }
     }
   }, [annotations, selectedRegion]);
@@ -702,9 +887,18 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     const img = imageRef.current;
     if (container && img && img.naturalWidth && img.naturalHeight) {
       const containerRect = container.getBoundingClientRect();
-      const scaleX = (containerRect.width - 40) / img.naturalWidth; // 40px padding
-      const scaleY = (containerRect.height - 40) / img.naturalHeight;
-      const fitScale = Math.min(scaleX, scaleY, 1); // Don't zoom in beyond 100%
+      if (containerRect.width <= 60 || containerRect.height <= 60) {
+        // Layout not stable yet; avoid producing a negative/invalid scale.
+        setScale(1);
+        setPanOffset({ x: 0, y: 0 });
+        return;
+      }
+
+      const availableWidth = Math.max(containerRect.width - 40, 1); // 40px padding
+      const availableHeight = Math.max(containerRect.height - 40, 1);
+      const scaleX = availableWidth / img.naturalWidth;
+      const scaleY = availableHeight / img.naturalHeight;
+      const fitScale = Math.max(0.05, Math.min(scaleX, scaleY, 1)); // Don't zoom in beyond 100%
 
       setScale(fitScale);
 
@@ -723,6 +917,14 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
   return (
     <div className="annotation-viewer">
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          duration={notification.duration}
+          onClose={() => setNotification(null)}
+        />
+      )}
       {/* Sidebar annotation list */}
       <div className="annotation-sidebar">
         <div style={{ display: 'flex', alignItems: 'center', marginTop: 0, marginBottom: 8 }}>
@@ -849,7 +1051,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
         <div
           ref={imageContainerRef}
           className="viewer-canvas-container"
-          onWheel={handleWheel}
           onMouseDown={handlePanMouseDown}
           onMouseMove={handlePanMouseMove}
           onMouseUp={handlePanMouseUp}
@@ -857,15 +1058,17 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           style={{
             cursor: isPanning ? 'grabbing' : (currentTool === 'select' ? 'default' : 'crosshair'),
             overflow: 'hidden',
-            position: 'relative'
+            position: 'relative',
+            overscrollBehavior: 'contain'
           }}
         >
           <div
             style={{
               transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${scale})`,
               transformOrigin: '0 0',
-              position: 'relative',
-              display: 'inline-block'
+              position: 'absolute',
+              top: 0,
+              left: 0
             }}
           >
             <img
@@ -910,8 +1113,43 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                   />
                 </label>
               </div>
+              {aiEnabled && (
+                <button
+                  type="button"
+                  onClick={handleAnalyzeDraftAnnotation}
+                  disabled={aiAnalyzing}
+                  style={{ marginRight: 8 }}
+                  title="Analyze the drawn region using LM Studio (does not save the annotation)"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+              )}
               <button type="submit">Save Annotation</button>
               <button type="button" style={{ marginLeft: 8 }} onClick={() => { setPendingRegion(null); setDescription(''); }}>Cancel</button>
+
+              {aiEnabled && aiResult && (
+                <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
+                  {getCropPreviewSrc(aiResult) && (
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ marginBottom: 4, color: '#999' }}>AI saw this crop:</div>
+                      <img
+                        src={getCropPreviewSrc(aiResult)}
+                        alt="AI crop preview"
+                        style={{ maxWidth: 280, maxHeight: 180, borderRadius: 6, border: '1px solid #3a3a3a' }}
+                      />
+                    </div>
+                  )}
+                  <div><strong>AI caption:</strong> {aiResult.caption || '(none)'}</div>
+                  {aiResult.tags?.length > 0 && (
+                    <div><strong>Tags:</strong> {aiResult.tags.join(', ')}</div>
+                  )}
+                  {aiResult.cropDebug && (
+                    <div style={{ marginTop: 6, color: '#999' }}>
+                      <strong>Crop:</strong> {aiResult.cropDebug.left},{aiResult.cropDebug.top} {aiResult.cropDebug.width}×{aiResult.cropDebug.height} (img {aiResult.cropDebug.imgW}×{aiResult.cropDebug.imgH})
+                    </div>
+                  )}
+                </div>
+              )}
             </form>
           </div>
         )}
@@ -1051,12 +1289,45 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               <button onClick={handleEditAnnotationSave}>
                 Save
               </button>
+              {aiEnabled && (
+                <button
+                  style={{ marginLeft: 8 }}
+                  onClick={handleAnalyzeSelectedAnnotation}
+                  disabled={aiAnalyzing}
+                  title="Analyze selected annotation region using LM Studio"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+              )}
               <button style={{ marginLeft: 8 }} onClick={() => {
                 setEditingDescription(false);
               }}>
                 Cancel
               </button>
             </div>
+            {aiEnabled && aiResult && (
+              <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
+                {getCropPreviewSrc(aiResult) && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ marginBottom: 4, color: '#999' }}>AI saw this crop:</div>
+                    <img
+                      src={getCropPreviewSrc(aiResult)}
+                      alt="AI crop preview"
+                      style={{ maxWidth: 320, maxHeight: 200, borderRadius: 6, border: '1px solid #3a3a3a' }}
+                    />
+                  </div>
+                )}
+                <div><strong>AI caption:</strong> {aiResult.caption || '(none)'}</div>
+                {aiResult.licensePlates?.length > 0 && (
+                  <div><strong>Plates:</strong> {aiResult.licensePlates.join(', ')}</div>
+                )}
+                {aiResult.cropDebug && (
+                  <div style={{ marginTop: 6, color: '#999' }}>
+                    <strong>Crop:</strong> {aiResult.cropDebug.left},{aiResult.cropDebug.top} {aiResult.cropDebug.width}×{aiResult.cropDebug.height} (img {aiResult.cropDebug.imgW}×{aiResult.cropDebug.imgH})
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1153,6 +1424,45 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
             {!readOnly && (
               <div className="annotation-details-actions">
+                {aiEnabled && (
+                  <button
+                    onClick={handleAnalyzeSelectedAnnotation}
+                    disabled={aiAnalyzing}
+                    title="Analyze selected annotation region using LM Studio"
+                    style={{
+                      backgroundColor: '#2a5a8a',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      marginRight: 8
+                    }}
+                  >
+                    {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                  </button>
+                )}
+                {aiEnabled && (
+                  <button
+                    onClick={() => setShowAiHistory((v) => !v)}
+                    style={{
+                      backgroundColor: '#444',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      marginRight: 8
+                    }}
+                    title="Show recent AI analysis runs for this annotation"
+                  >
+                    {showAiHistory ? 'Hide history' : 'History'}
+                  </button>
+                )}
                 <button
                   onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}
                   style={{
@@ -1170,6 +1480,122 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                 >
                   Delete Annotation
                 </button>
+              </div>
+            )}
+
+            {readOnly && aiEnabled && (
+              <div className="annotation-details-actions">
+                <button
+                  onClick={handleAnalyzeSelectedAnnotation}
+                  disabled={aiAnalyzing}
+                  title="Analyze selected annotation region using LM Studio"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+                <button
+                  onClick={() => setShowAiHistory((v) => !v)}
+                  style={{ marginLeft: 8 }}
+                  title="Show recent AI analysis runs for this annotation"
+                >
+                  {showAiHistory ? 'Hide history' : 'History'}
+                </button>
+              </div>
+            )}
+
+            {aiEnabled && aiResult && (
+              <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
+                {getCropPreviewSrc(aiResult) && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ marginBottom: 4, color: '#999' }}>AI saw this crop:</div>
+                    <img
+                      src={getCropPreviewSrc(aiResult)}
+                      alt="AI crop preview"
+                      style={{ maxWidth: 320, maxHeight: 200, borderRadius: 6, border: '1px solid #3a3a3a' }}
+                    />
+                  </div>
+                )}
+                {aiResult.caption && (
+                  <div><strong>AI caption:</strong> {aiResult.caption}</div>
+                )}
+                {aiResult.tags?.length > 0 && (
+                  <div><strong>Tags:</strong> {aiResult.tags.join(', ')}</div>
+                )}
+                {aiResult.licensePlates?.length > 0 && (
+                  <div><strong>Plates:</strong> {aiResult.licensePlates.join(', ')}</div>
+                )}
+                {aiResult.cropDebug && (
+                  <div style={{ marginTop: 6, color: '#999' }}>
+                    <strong>Crop:</strong> {aiResult.cropDebug.left},{aiResult.cropDebug.top} {aiResult.cropDebug.width}×{aiResult.cropDebug.height} (img {aiResult.cropDebug.imgW}×{aiResult.cropDebug.imgH})
+                  </div>
+                )}
+              </div>
+            )}
+
+            {aiEnabled && showAiHistory && (
+              <div style={{ marginTop: 12, borderTop: '1px solid #3a3a3a', paddingTop: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#ddd', marginBottom: 8 }}>Recent AI analyses</div>
+                {aiHistoryLoading && <div style={{ color: '#999', fontSize: 12 }}>Loading…</div>}
+                {aiHistoryError && <div style={{ color: '#c00', fontSize: 12 }}>Failed to load history</div>}
+                {Array.isArray(aiHistoryData?.annotationAiAnalysisRuns) && aiHistoryData.annotationAiAnalysisRuns.length === 0 && (
+                  <div style={{ color: '#999', fontSize: 12 }}>No history yet. Run Analyze to create entries.</div>
+                )}
+                {Array.isArray(aiHistoryData?.annotationAiAnalysisRuns) && aiHistoryData.annotationAiAnalysisRuns.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {aiHistoryData.annotationAiAnalysisRuns.map((run) => {
+                      const runPreview = run.cropUrl ? `${backendUrl}${run.cropUrl}` : null;
+                      return (
+                        <button
+                          key={run.id}
+                          onClick={() => {
+                            setAiResult({
+                              caption: run.caption,
+                              tags: run.tags,
+                              licensePlates: run.licensePlates,
+                              model: run.model,
+                              createdAt: run.createdAt,
+                              cropUrl: run.cropUrl,
+                              cropDebug: run.cropDebug,
+                            });
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            background: '#1e1e1e',
+                            border: '1px solid #3a3a3a',
+                            borderRadius: 6,
+                            padding: 8,
+                            color: '#ddd',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            gap: 10,
+                            alignItems: 'center',
+                          }}
+                          title="Click to preview this run"
+                        >
+                          {runPreview ? (
+                            <img
+                              src={runPreview}
+                              alt="Run crop"
+                              style={{ width: 84, height: 60, objectFit: 'cover', borderRadius: 4, border: '1px solid #333' }}
+                            />
+                          ) : (
+                            <div style={{ width: 84, height: 60, borderRadius: 4, border: '1px solid #333', background: '#111' }} />
+                          )}
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, color: '#aaa' }}>{new Date(run.createdAt).toLocaleString()}</div>
+                            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {run.caption || '(no caption)'}
+                            </div>
+                            {Array.isArray(run.tags) && run.tags.length > 0 && (
+                              <div style={{ fontSize: 12, color: '#bbb', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {run.tags.slice(0, 6).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

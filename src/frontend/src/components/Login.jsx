@@ -1,22 +1,7 @@
 import React, { useState } from 'react';
-import { gql } from '@apollo/client';
 import { useMutation } from '@apollo/client/react';
 import './Login.css';
-
-const LOGIN_MUTATION = gql`
-  mutation Login($username: String!, $password: String!) {
-    login(username: $username, password: $password) {
-      token
-      user {
-        id
-        username
-        email
-        full_name
-        role
-      }
-    }
-  }
-`;
+import { LOGIN_MUTATION } from '../graphql/auth';
 
 const Login = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');

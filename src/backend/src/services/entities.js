@@ -6,6 +6,43 @@ export class EntityService {
   }
 
   /**
+   * Find an entity by a specific tag (type/value), optionally constrained by entityType.
+   * Returns the full formatted entity or null.
+   */
+  async findEntityByTag({ entityType = null, tagType, tagValue }) {
+    const client = await this.dbPool.connect();
+    try {
+      const conditions = ['t.type = $1', 't.value = $2'];
+      const values = [tagType, tagValue];
+      let paramIndex = 3;
+
+      if (entityType) {
+        conditions.push(`e.entity_type = $${paramIndex++}`);
+        values.push(entityType);
+      }
+
+      const { rows } = await client.query(
+        `
+          SELECT e.id
+          FROM entities e
+          JOIN entity_tags et ON et.entity_id = e.id
+          JOIN tags t ON t.id = et.tag_id
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY e.created_at DESC
+          LIMIT 1
+        `,
+        values
+      );
+
+      const id = rows[0]?.id;
+      if (!id) return null;
+      return await this.getEntityById(id);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create a new entity
    */
   async createEntity({ entityType, displayName, tags, metadata }) {

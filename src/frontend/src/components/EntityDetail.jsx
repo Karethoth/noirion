@@ -1,162 +1,94 @@
 import React, { useState, useEffect } from 'react';
-import { gql } from '@apollo/client';
-import { useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
+import { useMutation, useQuery } from '@apollo/client/react';
 import Notification from './Notification';
+import EntitySearch from './EntitySearch';
+import TagPickerModal from './TagPickerModal';
 import './EntityDetail.css';
+import './TimelineView.css';
+import { MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
+import { formatMGRS, parseMGRS } from '../utils/coordinates';
+import MapStyleController from './MapStyleController';
+import { MAP_STYLES, loadSavedMapStyle } from '../utils/mapStyles';
+import { loadSavedMapView } from '../utils/mapViewStorage';
+import { buildAssetUrl } from '../utils/assetUrls';
+import {
+  GET_ENTITY,
+  GET_ENTITIES,
+  GET_IMAGES_BY_ENTITY,
+  CREATE_ENTITY,
+  UPDATE_ENTITY,
+  ADD_ENTITY_ATTRIBUTE,
+  UPDATE_ENTITY_ATTRIBUTE,
+  DELETE_ENTITY_ATTRIBUTE
+} from '../graphql/entities';
+import { GET_PRESENCES_BY_ENTITY } from '../graphql/presences';
+import { GET_ENTITY_LINKS, CREATE_ENTITY_LINK, DELETE_ENTITY_LINK } from '../graphql/entityLinks';
+import { GET_EVENTS_BY_ENTITY } from '../graphql/events';
 
-const GET_ENTITY = gql`
-  query GetEntity($id: ID!) {
-    entity(id: $id) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-        createdAt
-        updatedAt
-      }
-    }
-  }
-`;
-
-const CREATE_ENTITY = gql`
-  mutation CreateEntity($input: CreateEntityInput!) {
-    createEntity(input: $input) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-      }
-    }
-  }
-`;
-
-const UPDATE_ENTITY = gql`
-  mutation UpdateEntity($id: ID!, $input: UpdateEntityInput!) {
-    updateEntity(id: $id, input: $input) {
-      id
-      entityType
-      displayName
-      tags
-      metadata
-      updatedAt
-    }
-  }
-`;
-
-const ADD_ENTITY_ATTRIBUTE = gql`
-  mutation AddEntityAttribute($entityId: ID!, $input: AddEntityAttributeInput!) {
-    addEntityAttribute(entityId: $entityId, input: $input) {
-      id
-      attributeName
-      attributeValue
-      confidence
-      createdAt
-      updatedAt
-    }
-  }
-`;
-
-const UPDATE_ENTITY_ATTRIBUTE = gql`
-  mutation UpdateEntityAttribute($id: ID!, $input: UpdateEntityAttributeInput!) {
-    updateEntityAttribute(id: $id, input: $input) {
-      id
-      attributeName
-      attributeValue
-      confidence
-      updatedAt
-    }
-  }
-`;
-
-const DELETE_ENTITY_ATTRIBUTE = gql`
-  mutation DeleteEntityAttribute($id: ID!) {
-    deleteEntityAttribute(id: $id)
-  }
-`;
-
-const GET_PRESENCES_BY_ENTITY = gql`
-  query GetPresencesByEntity($entityId: ID!, $limit: Int, $offset: Int) {
-    presencesByEntity(entityId: $entityId, limit: $limit, offset: $offset) {
-      id
-      observedAt
-      latitude
-      longitude
-      notes
-      sourceType
-      sourceAsset {
-        id
-        filePath
-      }
-    }
-  }
-`;
-
-const GET_ENTITY_LINKS = gql`
-  query GetEntityLinks($entityId: ID!, $limit: Int, $offset: Int) {
-    entityLinks(entityId: $entityId, limit: $limit, offset: $offset) {
-      id
-      fromEntityId
-      toEntityId
-      relationType
-      confidence
-      notes
-      fromEntity { id displayName entityType }
-      toEntity { id displayName entityType }
-      createdAt
-    }
-  }
-`;
-
-const CREATE_ENTITY_LINK = gql`
-  mutation CreateEntityLink($input: CreateEntityLinkInput!) {
-    createEntityLink(input: $input) {
-      id
-    }
-  }
-`;
-
-const DELETE_ENTITY_LINK = gql`
-  mutation DeleteEntityLink($id: ID!) {
-    deleteEntityLink(id: $id)
-  }
-`;
-
-const SEARCH_ENTITIES = gql`
-  query SearchEntities($query: String!, $limit: Int) {
-    searchEntities(query: $query, limit: $limit) {
-      id
-      displayName
-      entityType
-      tags
-    }
-  }
-`;
+initLeafletDefaultMarkerIcons();
 
 const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const isNewEntity = !entity;
   const canWrite = userRole === 'admin' || userRole === 'investigator';
+
+  const extractLatLngFromAttributes = (attrs) => {
+    if (!Array.isArray(attrs)) return { lat: '', lng: '' };
+
+    const byName = new Map();
+    for (const a of attrs) {
+      const key = String(a?.attributeName || '').trim().toLowerCase();
+      if (!key) continue;
+      byName.set(key, a);
+    }
+
+    const parseScalar = (v) => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+
+    // Preferred explicit keys
+    const latAttr = byName.get('latitude') || byName.get('lat');
+    const lngAttr = byName.get('longitude') || byName.get('lng') || byName.get('lon');
+
+    let lat = parseScalar(latAttr?.attributeValue);
+    let lng = parseScalar(lngAttr?.attributeValue);
+
+    // Optional combined object keys
+    if (lat == null || lng == null) {
+      const locAttr = byName.get('location') || byName.get('coords') || byName.get('coordinates');
+      const obj = locAttr?.attributeValue;
+      if (obj && typeof obj === 'object') {
+        if (lat == null) lat = parseScalar(obj.lat ?? obj.latitude ?? obj.y);
+        if (lng == null) lng = parseScalar(obj.lng ?? obj.lon ?? obj.longitude ?? obj.x);
+      }
+    }
+
+    return {
+      lat: lat != null ? String(lat) : '',
+      lng: lng != null ? String(lng) : ''
+    };
+  };
 
   // Form state
   const [entityType, setEntityType] = useState(entity?.entityType || 'person');
   const [displayName, setDisplayName] = useState(entity?.displayName || '');
   const [tags, setTags] = useState(entity?.tags?.join(', ') || '');
   const [attributes, setAttributes] = useState(entity?.attributes || []);
+
+  const [isTagsModalOpen, setIsTagsModalOpen] = useState(false);
+
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [locationLat, setLocationLat] = useState('');
+  const [locationLng, setLocationLng] = useState('');
+  const [locationMGRS, setLocationMGRS] = useState('');
+
+  const mapStyle = loadSavedMapStyle('mapStyle');
 
   // New attribute form
   const [newAttrName, setNewAttrName] = useState('');
@@ -181,10 +113,59 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
     }
   });
 
+  const { data: allEntitiesData } = useQuery(GET_ENTITIES, {
+    variables: {
+      entityType: null,
+      limit: 500,
+      offset: 0,
+    },
+  });
+
+  const tagCounts = React.useMemo(() => {
+    const counts = new Map();
+    const ents = allEntitiesData?.entities || [];
+    for (const e of ents) {
+      const uniq = new Set((e?.tags || []).filter(Boolean).map((t) => String(t)));
+      for (const t of uniq) {
+        counts.set(t, (counts.get(t) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [allEntitiesData?.entities]);
+
+  const topTags = React.useMemo(() => {
+    const entries = Array.from(tagCounts.entries());
+    entries.sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    return entries.map(([tag, count]) => ({ tag, count }));
+  }, [tagCounts]);
+
   const { data: presencesData } = useQuery(GET_PRESENCES_BY_ENTITY, {
     variables: {
       entityId: entity?.id,
-      limit: 50,
+      limit: 500,
+      offset: 0
+    },
+    skip: isNewEntity
+  });
+
+  const { data: imagesByEntityData } = useQuery(GET_IMAGES_BY_ENTITY, {
+    variables: {
+      entityId: entity?.id,
+      limit: 1000,
+      offset: 0,
+    },
+    skip: isNewEntity,
+    fetchPolicy: 'cache-and-network',
+  });
+
+  const assetPreviewUrl = (img) => {
+    return buildAssetUrl(img?.filePath);
+  };
+
+  const { data: eventsByEntityData } = useQuery(GET_EVENTS_BY_ENTITY, {
+    variables: {
+      entityId: entity?.id,
+      limit: 200,
       offset: 0
     },
     skip: isNewEntity
@@ -211,24 +192,11 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
     }
   });
 
-  const [searchEntities, { data: searchData }] = useLazyQuery(SEARCH_ENTITIES);
-  const [linkSearch, setLinkSearch] = useState('');
   const [selectedTargetId, setSelectedTargetId] = useState('');
+  const [selectedTargetLabel, setSelectedTargetLabel] = useState('');
   const [relationType, setRelationType] = useState('associates_with');
   const [linkConfidence, setLinkConfidence] = useState(1.0);
   const [linkNotes, setLinkNotes] = useState('');
-
-  const handleSearchEntities = async (value) => {
-    setLinkSearch(value);
-    if (!value || value.trim().length < 2) return;
-    try {
-      await searchEntities({
-        variables: { query: value.trim(), limit: 10 }
-      });
-    } catch (err) {
-      console.error('Entity search failed:', err);
-    }
-  };
 
   const handleCreateLink = async () => {
     if (!canWrite) {
@@ -257,6 +225,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
         }
       });
       setSelectedTargetId('');
+      setSelectedTargetLabel('');
       setLinkNotes('');
       showNotification('Relationship created', 'success');
     } catch (err) {
@@ -283,13 +252,99 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
       setDisplayName(entityData.entity.displayName || '');
       setTags(entityData.entity.tags?.join(', ') || '');
       setAttributes(entityData.entity.attributes || []);
+
+      const { lat, lng } = extractLatLngFromAttributes(entityData.entity.attributes || []);
+      setLocationLat(lat);
+      setLocationLng(lng);
+      if (lat && lng) {
+        const latNum = parseFloat(lat);
+        const lngNum = parseFloat(lng);
+        if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+          setLocationMGRS(formatMGRS(lngNum, latNum));
+        }
+      }
     }
   }, [entityData]);
+
+  useEffect(() => {
+    // When opening the modal, we may have entity attributes from the parent list already;
+    // prefill from those immediately while the GET_ENTITY query resolves.
+    if (isNewEntity) return;
+    const { lat, lng } = extractLatLngFromAttributes(entity?.attributes || []);
+    if (lat) setLocationLat(lat);
+    if (lng) setLocationLng(lng);
+    if (lat && lng) {
+      const latNum = parseFloat(lat);
+      const lngNum = parseFloat(lng);
+      if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+        setLocationMGRS(formatMGRS(lngNum, latNum));
+      }
+    }
+  }, [isNewEntity, entity?.id, entity?.attributes]);
 
   const [createEntity, { loading: creating }] = useMutation(CREATE_ENTITY);
   const [updateEntity, { loading: updating }] = useMutation(UPDATE_ENTITY);
   const [addAttribute] = useMutation(ADD_ENTITY_ATTRIBUTE);
+  const [updateAttribute] = useMutation(UPDATE_ENTITY_ATTRIBUTE);
   const [deleteAttribute] = useMutation(DELETE_ENTITY_ATTRIBUTE);
+
+  const upsertAttributeByName = async (entityId, attributeName, attributeValue, confidence = 1.0) => {
+    const existing = (attributes || []).find((a) => a.attributeName === attributeName);
+    if (existing?.id) {
+      const result = await updateAttribute({
+        variables: {
+          id: existing.id,
+          input: {
+            attributeValue,
+            confidence: confidence != null ? parseFloat(confidence) : null
+          }
+        }
+      });
+      const updated = result?.data?.updateEntityAttribute;
+      if (updated?.id) {
+        setAttributes((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+      }
+      return;
+    }
+
+    const result = await addAttribute({
+      variables: {
+        entityId,
+        input: {
+          attributeName,
+          attributeValue,
+          confidence: confidence != null ? parseFloat(confidence) : null
+        }
+      }
+    });
+    const created = result?.data?.addEntityAttribute;
+    if (created?.id) {
+      setAttributes((prev) => [...prev, created]);
+    }
+  };
+
+  const persistLocationAttributesIfNeeded = async (entityId) => {
+    if (!entityId) return;
+    if (entityType !== 'location') return;
+
+    let lat = locationLat.trim() ? parseFloat(locationLat) : null;
+    let lng = locationLng.trim() ? parseFloat(locationLng) : null;
+    if ((lat == null || lng == null) && locationMGRS.trim()) {
+      const parsed = parseMGRS(locationMGRS);
+      if (!parsed) {
+        throw new Error('Invalid MGRS coordinate');
+      }
+      lat = parsed.latitude;
+      lng = parsed.longitude;
+      setLocationLat(String(lat));
+      setLocationLng(String(lng));
+    }
+    if (lat == null || lng == null) return;
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+    await upsertAttributeByName(entityId, 'latitude', lat, 1.0);
+    await upsertAttributeByName(entityId, 'longitude', lng, 1.0);
+  };
 
   const handleSave = async () => {
     if (!canWrite) {
@@ -313,6 +368,9 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
             }
           }
         });
+
+        const createdEntityId = result?.data?.createEntity?.id;
+        await persistLocationAttributesIfNeeded(createdEntityId);
         showNotification('Entity created successfully', 'success');
         onSaved(result.data.createEntity);
       } else {
@@ -325,6 +383,8 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
             }
           }
         });
+
+        await persistLocationAttributesIfNeeded(entity.id);
         showNotification('Entity updated successfully', 'success');
         refetch();
         onSaved();
@@ -333,6 +393,65 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
       console.error('Error saving entity:', err);
       showNotification(`Failed to save entity: ${err.message}`, 'error');
     }
+  };
+
+  const LocationPicker = ({ valueLat, valueLng, onPick }) => {
+    useMapEvents({
+      click(e) {
+        onPick(e.latlng.lat, e.latlng.lng);
+      }
+    });
+
+    if (valueLat == null || valueLng == null) return null;
+    return <Marker position={[valueLat, valueLng]} />;
+  };
+
+  const LocationPickerModal = ({ isOpen, title, valueLat, valueLng, onPick, onClose }) => {
+    if (!isOpen) return null;
+
+    const saved = loadSavedMapView('mapView');
+    const fallbackCenter = saved?.center ? [saved.center.lat, saved.center.lng] : [60.1699, 24.9384];
+    const fallbackZoom = typeof saved?.zoom === 'number' ? saved.zoom : 4;
+
+    const hasValue = Number.isFinite(valueLat) && Number.isFinite(valueLng);
+    const center = hasValue ? [valueLat, valueLng] : fallbackCenter;
+    const zoom = hasValue ? 14 : fallbackZoom;
+    const styleCfg = MAP_STYLES[mapStyle] || MAP_STYLES.day;
+
+    return (
+      <div className="timeline-modal-overlay" onClick={onClose}>
+        <div className="timeline-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="timeline-modal-header">
+            <div className="timeline-modal-title">{title}</div>
+            <button className="timeline-modal-close" onClick={onClose} aria-label="Close">
+              ×
+            </button>
+          </div>
+          <div className="timeline-modal-body">
+            <div className="timeline-map-container">
+              <MapContainer
+                center={center}
+                zoom={zoom}
+                scrollWheelZoom={true}
+                style={{ height: '340px', width: '100%' }}
+              >
+                <MapStyleController style={mapStyle} />
+                <TileLayer attribution={styleCfg.attribution} url={styleCfg.url} />
+                <LocationPicker
+                  valueLat={hasValue ? valueLat : null}
+                  valueLng={hasValue ? valueLng : null}
+                  onPick={(lat, lng) => {
+                    onPick(lat, lng);
+                    onClose();
+                  }}
+                />
+              </MapContainer>
+            </div>
+            <div className="timeline-muted">Click the map to set latitude/longitude.</div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const handleAddAttribute = async () => {
@@ -453,16 +572,101 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
               <input
                 type="text"
                 value={tags}
-                onChange={(e) => setTags(e.target.value)}
+                readOnly
+                onClick={() => {
+                  if (!canWrite) return;
+                  setIsTagsModalOpen(true);
+                }}
+                onFocus={() => {
+                  if (!canWrite) return;
+                  setIsTagsModalOpen(true);
+                }}
                 placeholder="tag1, tag2, category:value"
                 disabled={!canWrite}
                 className="form-control"
+              />
+              <TagPickerModal
+                isOpen={isTagsModalOpen}
+                title="Edit tags"
+                value={tags}
+                onChange={setTags}
+                tagsWithCounts={topTags}
+                placeholder="tag1, tag2, category:value"
+                onClose={() => setIsTagsModalOpen(false)}
               />
               <small style={{ color: '#888', fontSize: '12px', marginTop: '4px', display: 'block' }}>
                 Use tags to categorize and add metadata. Examples: "color:blue", "status:active", "priority:high"
               </small>
             </div>
           </div>
+
+          {entityType === 'location' && (
+            <div className="form-section">
+              <h3>Location</h3>
+
+              <div className="form-group">
+                <label>MGRS</label>
+                <input
+                  type="text"
+                  value={locationMGRS}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setLocationMGRS(next);
+                    const parsed = parseMGRS(next);
+                    if (parsed) {
+                      setLocationLat(String(parsed.latitude));
+                      setLocationLng(String(parsed.longitude));
+                    }
+                  }}
+                  placeholder="e.g. 35WLP 70743 01293"
+                  disabled={!canWrite}
+                  className="form-control"
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-save"
+                  onClick={() => setIsLocationModalOpen(true)}
+                  disabled={!canWrite}
+                >
+                  Set place…
+                </button>
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => {
+                    setLocationLat('');
+                    setLocationLng('');
+                    setLocationMGRS('');
+                  }}
+                  disabled={!canWrite}
+                >
+                  Clear place
+                </button>
+              </div>
+            </div>
+          )}
+
+          <LocationPickerModal
+            isOpen={isLocationModalOpen}
+            title="Set entity location"
+            valueLat={(() => {
+              const v = locationLat.trim() ? parseFloat(locationLat) : null;
+              return Number.isFinite(v) ? v : null;
+            })()}
+            valueLng={(() => {
+              const v = locationLng.trim() ? parseFloat(locationLng) : null;
+              return Number.isFinite(v) ? v : null;
+            })()}
+            onPick={(lat, lng) => {
+              setLocationLat(String(lat));
+              setLocationLng(String(lng));
+              setLocationMGRS(formatMGRS(lng, lat));
+            }}
+            onClose={() => setIsLocationModalOpen(false)}
+          />
 
           {!isNewEntity && (
             <div className="form-section">
@@ -540,29 +744,113 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
 
           {!isNewEntity && (
             <div className="form-section">
+              <h3>Assets</h3>
+
+              {imagesByEntityData?.imagesByEntity?.length > 0 ? (
+                <div className="attributes-list">
+                  {imagesByEntityData.imagesByEntity.map((img) => (
+                    <div key={img.id} className="attribute-item">
+                      <div className="attribute-info" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        {img.filePath ? (
+                          <img
+                            src={assetPreviewUrl(img) || ''}
+                            alt={img.displayName || img.filename || `Asset ${img.id}`}
+                            loading="lazy"
+                            style={{
+                              width: 54,
+                              height: 54,
+                              borderRadius: 8,
+                              objectFit: 'cover',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              background: 'rgba(0,0,0,0.25)',
+                              flex: '0 0 auto',
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="attribute-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {img.displayName || img.filename || `Asset ${img.id}`}
+                          </div>
+                          <div className="attribute-meta">
+                            {img.captureTimestamp
+                              ? `Captured: ${new Date(img.captureTimestamp).toLocaleString()}`
+                              : img.uploadedAt
+                                ? `Uploaded: ${new Date(img.uploadedAt).toLocaleString()}`
+                                : 'Time: unknown'}
+                          </div>
+                          <div className="attribute-meta">
+                            {img.latitude != null && img.longitude != null
+                              ? `Coords: ${formatMGRS(Number(img.longitude), Number(img.latitude))}`
+                              : 'Coords: —'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: '#888', fontSize: '14px' }}>
+                  No linked assets yet.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isNewEntity && (
+            <div className="form-section">
               <h3>Presences</h3>
 
               {presencesData?.presencesByEntity?.length > 0 ? (
                 <div className="attributes-list">
                   {presencesData.presencesByEntity.map((p) => (
                     <div key={p.id} className="attribute-item">
-                      <div className="attribute-info">
+                      <div className="attribute-info" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        {p?.sourceAsset?.filePath ? (
+                          <img
+                            src={buildAssetUrl(p.sourceAsset.filePath)}
+                            alt={p?.sourceAsset?.id ? `Asset ${p.sourceAsset.id}` : 'Asset'}
+                            loading="lazy"
+                            style={{
+                              width: 54,
+                              height: 54,
+                              borderRadius: 8,
+                              objectFit: 'cover',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              background: 'rgba(0,0,0,0.25)',
+                              flex: '0 0 auto',
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+
+                        <div style={{ minWidth: 0, flex: 1 }}>
                         <div className="attribute-name">
                           {p.observedAt ? new Date(p.observedAt).toLocaleString() : 'Unknown time'}
                         </div>
                         <div className="attribute-value">
                           {p.latitude != null && p.longitude != null
-                            ? `${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}`
+                            ? formatMGRS(p.longitude, p.latitude)
                             : 'No GPS'}
                         </div>
                         <div className="attribute-meta">
                           {p.sourceType ? `Source: ${p.sourceType}` : 'Source: unknown'}
                         </div>
+                        {p?.sourceAsset?.id && (
+                          <div className="attribute-meta">
+                            Asset: {p.sourceAsset.id}
+                          </div>
+                        )}
                         {p.notes && (
                           <div className="attribute-meta">
                             Notes: {p.notes}
                           </div>
                         )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -577,37 +865,79 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
 
           {!isNewEntity && (
             <div className="form-section">
+              <h3>Events</h3>
+
+              {eventsByEntityData?.eventsByEntity?.length > 0 ? (
+                <div className="attributes-list">
+                  {eventsByEntityData.eventsByEntity.map((evt) => (
+                    <div key={evt.id} className="attribute-item">
+                      <div className="attribute-info">
+                        <div className="attribute-name">
+                          {evt.title || 'Untitled event'}
+                        </div>
+                        <div className="attribute-value">
+                          {evt.occurredAt ? new Date(evt.occurredAt).toLocaleString() : 'Unknown time'}
+                        </div>
+                        {evt.description && (
+                          <div className="attribute-meta">
+                            {evt.description}
+                          </div>
+                        )}
+                        <div className="attribute-meta">
+                          {evt.latitude != null && evt.longitude != null
+                            ? formatMGRS(evt.longitude, evt.latitude)
+                            : 'No GPS'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: '#888', fontSize: '14px' }}>
+                  No events yet.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isNewEntity && (
+            <div className="form-section">
               <h3>Relationships</h3>
 
               {canWrite && (
                 <div style={{ marginBottom: '12px' }}>
                   <div className="form-group">
-                    <label>Find target entity</label>
-                    <input
-                      type="text"
-                      value={linkSearch}
-                      onChange={(e) => handleSearchEntities(e.target.value)}
-                      placeholder="Search by name..."
-                      className="form-control"
-                    />
-                  </div>
-
-                  <div className="form-group">
                     <label>Target entity</label>
-                    <select
-                      value={selectedTargetId}
-                      onChange={(e) => setSelectedTargetId(e.target.value)}
-                      className="form-control"
-                    >
-                      <option value="">Select…</option>
-                      {(searchData?.searchEntities || [])
-                        .filter((e) => e.id !== entity?.id)
-                        .map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {(e.displayName || 'Unnamed')} ({e.entityType})
-                          </option>
-                        ))}
-                    </select>
+                    <EntitySearch
+                      placeholder="Search entities..."
+                      onSelect={(target) => {
+                        if (!target?.id) return;
+                        if (target.id === entity?.id) {
+                          showNotification('You cannot link an entity to itself', 'error');
+                          return;
+                        }
+                        setSelectedTargetId(target.id);
+                        setSelectedTargetLabel(`${target.displayName || 'Unnamed'} (${target.entityType || 'unknown'})`);
+                      }}
+                    />
+
+                    {selectedTargetId && (
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div style={{ color: '#666', fontSize: '13px' }}>
+                          Selected: <strong>{selectedTargetLabel || selectedTargetId}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-cancel"
+                          onClick={() => {
+                            setSelectedTargetId('');
+                            setSelectedTargetLabel('');
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group">

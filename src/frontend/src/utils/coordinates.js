@@ -11,3 +11,23 @@ export function formatMGRS(longitude, latitude) {
   // Format: GridZone + 100km square (e.g., "35WLP") + space + easting (5 digits) + space + northing (5 digits)
   return mgrsCoord.replace(/^(\d{1,2}[A-Z]{3})(\d{5})(\d{5})$/, '$1 $2 $3');
 }
+
+/**
+ * Convert an MGRS coordinate string into longitude/latitude.
+ * @param {string} mgrsString - MGRS coordinate (spaces allowed)
+ * @returns {{ longitude: number, latitude: number } | null}
+ */
+export function parseMGRS(mgrsString) {
+  if (!mgrsString || typeof mgrsString !== 'string') return null;
+  const normalized = mgrsString.trim().replace(/\s+/g, '');
+  if (!normalized) return null;
+  try {
+    const point = mgrs.toPoint(normalized);
+    if (!Array.isArray(point) || point.length < 2) return null;
+    const [longitude, latitude] = point;
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
+    return { longitude, latitude };
+  } catch {
+    return null;
+  }
+}

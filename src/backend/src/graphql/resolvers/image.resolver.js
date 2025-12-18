@@ -1,6 +1,7 @@
 import { AssetsService } from '../../services/assets.js';
 import { GraphQLUpload } from 'graphql-upload-minimal';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
+import { ImageAnalysisService } from '../../services/image-analysis.js';
 
 const imageResolvers = {
   Upload: GraphQLUpload,
@@ -53,6 +54,11 @@ const imageResolvers = {
         return [];
       }
     }
+    ,
+    aiAnalysis: async (parent) => {
+      // aiAnalysis is stored in assets.metadata.aiAnalysis and passed through in formatted assets.
+      return parent.aiAnalysis || parent?.metadata?.aiAnalysis || null;
+    }
   },
 
   Query: {
@@ -72,7 +78,16 @@ const imageResolvers = {
       requireAuth(context.user);
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAssetsInArea(args.bounds);
-    }
+    },
+
+    imagesByEntity: async (parent, args, context) => {
+      requireAuth(context.user);
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.getAssetsByEntityId(args.entityId, {
+        limit: args.limit,
+        offset: args.offset,
+      });
+    },
   },
 
   Mutation: {
@@ -139,6 +154,48 @@ const imageResolvers = {
 
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.deleteAsset(args.id);
+    },
+
+    updateImage: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      const assetsService = new AssetsService(context.dbPool);
+      const { id, input } = args;
+
+      return await assetsService.updateAssetManualMetadata(
+        id,
+        {
+          displayName: input.displayName,
+          latitude: input.latitude,
+          longitude: input.longitude,
+          altitude: input.altitude,
+          captureTimestamp: input.captureTimestamp,
+        },
+        context.userId
+      );
+    },
+
+    setImageAutoPresenceIgnoredEntities: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.setAssetAutoPresenceIgnoredEntities(
+        args.imageId,
+        args.ignoredEntityIds || [],
+        context.userId
+      );
+    },
+
+    analyzeImage: async (parent, args, context) => {
+      const persist = args.persist !== false;
+      requirePermission(context.user, persist ? 'write' : 'read');
+
+      const analysisService = new ImageAnalysisService(context.dbPool);
+      return await analysisService.analyzeImageByAssetId(args.id, {
+        model: args.model || null,
+        persist,
+        userId: context.userId,
+      });
     }
   }
 };

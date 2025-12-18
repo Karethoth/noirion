@@ -1,6 +1,10 @@
 import { AnnotationService } from '../../services/annotations.js';
 import { AssetsService } from '../../services/assets.js';
+import { ImageAnalysisService } from '../../services/image-analysis.js';
+import { AnnotationAiAnalysisRunsService } from '../../services/annotation-ai-analysis-runs.js';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
+import { normalizeLicensePlate } from '../../utils/license-plates.js';
+import { EntityService } from '../../services/entities.js';
 
 const annotationResolvers = {
   Query: {
@@ -14,7 +18,16 @@ const annotationResolvers = {
       requireAuth(context.user);
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getAnnotationById(args.id);
-    }
+    },
+
+    annotationAiAnalysisRuns: async (parent, args, context) => {
+      requireAuth(context.user);
+      const runs = new AnnotationAiAnalysisRunsService(context.dbPool);
+      return await runs.listRuns({
+        annotationId: args.annotationId || null,
+        limit: args.limit ?? 20,
+      });
+    },
   },
 
   Mutation: {
@@ -77,10 +90,79 @@ const annotationResolvers = {
       );
     },
 
+    linkVehiclePlateToAnnotation: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      const plate = normalizeLicensePlate(args.plate);
+      if (!plate) {
+        throw new Error('Invalid plate');
+      }
+
+      const entityService = new EntityService(context.dbPool);
+
+      // Prefer matching an existing vehicle entity by plate tag.
+      let entity = await entityService.findEntityByTag({
+        entityType: 'vehicle',
+        tagType: 'plate',
+        tagValue: plate,
+      });
+
+      if (!entity?.id) {
+        // Fall back to vehicle:<plate> tag if older data used that.
+        entity = await entityService.findEntityByTag({
+          entityType: 'vehicle',
+          tagType: 'vehicle',
+          tagValue: plate,
+        });
+      }
+
+      if (!entity?.id) {
+        entity = await entityService.createEntity({
+          entityType: 'vehicle',
+          displayName: plate,
+          tags: [`plate:${plate}`, `vehicle:${plate}`],
+          metadata: { source: 'auto_presence_approval' },
+        });
+      }
+
+      const annotationService = new AnnotationService(context.dbPool);
+      return await annotationService.linkEntityToAnnotation(args.annotationId, entity.id, {
+        relationType: args.relationType,
+        confidence: args.confidence,
+        notes: args.notes,
+        observedBy: context.userId,
+      });
+    },
+
     unlinkEntityFromAnnotation: async (parent, args, context) => {
       requirePermission(context.user, 'write');
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.unlinkEntityFromAnnotation(args.linkId);
+    },
+
+    analyzeAnnotation: async (parent, args, context) => {
+      const persist = args.persist !== false;
+      requirePermission(context.user, persist ? 'write' : 'read');
+
+      const analysisService = new ImageAnalysisService(context.dbPool);
+      return await analysisService.analyzeAnnotationById(args.annotationId, {
+        regionId: args.regionId || null,
+        model: args.model || null,
+        persist,
+        userId: context.userId,
+      });
+    },
+
+    analyzeAnnotationDraft: async (parent, args, context) => {
+      requirePermission(context.user, 'read');
+
+      const analysisService = new ImageAnalysisService(context.dbPool);
+      return await analysisService.analyzeAnnotationDraft(args.assetId, {
+        shapeType: args.input?.shapeType,
+        coordinates: args.input?.coordinates,
+        model: args.model || null,
+        userId: context.userId,
+      });
     }
   },
 
@@ -98,6 +180,10 @@ const annotationResolvers = {
     entityLinks: async (parent, args, context) => {
       const annotationService = new AnnotationService(context.dbPool);
       return await annotationService.getEntityLinksByAnnotationId(parent.id);
+    },
+
+    aiAnalysis: async (parent) => {
+      return parent?.metadata?.aiAnalysis || null;
     }
   },
 
@@ -117,6 +203,21 @@ const annotationResolvers = {
       }
     }
   }
+};
+
+// Field resolvers for analysis run rows (snake_case -> camelCase)
+annotationResolvers.AnnotationAIAnalysisRun = {
+  annotationId: (p) => p.annotation_id,
+  assetId: (p) => p.asset_id,
+  assetFilename: (p) => p.asset_filename,
+  regionId: (p) => p.region_id,
+  createdAt: (p) => (p.created_at instanceof Date ? p.created_at.toISOString() : p.created_at),
+  createdBy: (p) => p.created_by,
+  cropUrl: (p) => p.crop_path,
+  cropDebug: (p) => p.crop_debug,
+  caption: (p) => p.analysis?.caption ?? null,
+  tags: (p) => (Array.isArray(p.analysis?.tags) ? p.analysis.tags : []),
+  licensePlates: (p) => (Array.isArray(p.analysis?.licensePlates) ? p.analysis.licensePlates : []),
 };
 
 export default annotationResolvers;

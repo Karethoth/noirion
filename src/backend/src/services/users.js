@@ -58,7 +58,7 @@ export class UsersService {
       }
 
       // Don't return password_hash
-      const { password_hash, ...userWithoutPassword } = user;
+      const { password_hash: _password_hash, ...userWithoutPassword } = user;
 
       // Generate JWT token
       const token = generateToken(userWithoutPassword);

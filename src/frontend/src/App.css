@@ -22,6 +22,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   padding: 10px 24px;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: white;
@@ -36,6 +37,8 @@
 .nav-tabs {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .nav-tab {
@@ -137,6 +140,29 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* Asset Editor layout helpers */
+.asset-editor-root {
+  height: 100%;
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.asset-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .asset-editor-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Map Container - Full Screen */

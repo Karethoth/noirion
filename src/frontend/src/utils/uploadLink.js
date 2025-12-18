@@ -1,5 +1,23 @@
 import { ApolloLink, Observable } from '@apollo/client';
 
+const DEBUG_GRAPHQL = ['1', 'true', 'yes', 'on'].includes(
+  String(import.meta.env.VITE_DEBUG_GRAPHQL || '').toLowerCase()
+);
+const parsedTimeoutMs = parseInt(String(import.meta.env.VITE_GRAPHQL_TIMEOUT_MS || ''), 10);
+const GRAPHQL_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 30000;
+
+function newRequestId() {
+  return `gql_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 // Helper function to extract files from variables
 function extractFiles(obj) {
   const files = new Map();
@@ -33,6 +51,9 @@ export const createUploadLink = (options) => {
     return new Observable((observer) => {
       const context = operation.getContext();
       const { operationName, variables, query } = operation;
+
+      const requestId = newRequestId();
+      const start = Date.now();
 
       // Extract files from variables
       const { files } = extractFiles({ variables }, ['variables']);
@@ -98,13 +119,43 @@ export const createUploadLink = (options) => {
         delete headers['Content-Type'];
       }
 
+      if (DEBUG_GRAPHQL) {
+        console.log(
+          `[${requestId}] -> ${operationName || 'anonymous'} uri=${uri} files=${files.size} timeoutMs=${GRAPHQL_TIMEOUT_MS}`
+        );
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), GRAPHQL_TIMEOUT_MS);
+
       fetch(uri, {
         method: 'POST',
         headers,
         body,
+        signal: controller.signal,
       })
         .then((response) => {
-          return response.json();
+          return response.text().then((text) => {
+            const ms = Date.now() - start;
+
+            if (DEBUG_GRAPHQL) {
+              console.log(`[${requestId}] <- ${operationName || 'anonymous'} status=${response.status} (${ms}ms)`);
+            }
+
+            const parsed = safeJsonParse(text);
+
+            if (!response.ok) {
+              const snippet = (text || '').slice(0, 500);
+              throw new Error(`HTTP ${response.status} from GraphQL endpoint. Body: ${snippet}`);
+            }
+
+            if (!parsed) {
+              const snippet = (text || '').slice(0, 500);
+              throw new Error(`Non-JSON response from GraphQL endpoint. Body: ${snippet}`);
+            }
+
+            return parsed;
+          });
         })
         .then((result) => {
           if (result.errors) {
@@ -115,7 +166,20 @@ export const createUploadLink = (options) => {
           }
         })
         .catch((error) => {
+          const ms = Date.now() - start;
+          if (DEBUG_GRAPHQL) {
+            console.warn(`[${requestId}] xx ${operationName || 'anonymous'} failed (${ms}ms):`, error);
+          }
+
+          if (error?.name === 'AbortError') {
+            observer.error(new Error(`GraphQL request timed out after ${GRAPHQL_TIMEOUT_MS}ms (AbortError)`));
+            return;
+          }
+
           observer.error(error);
+        })
+        .finally(() => {
+          clearTimeout(timeout);
         });
     });
   });

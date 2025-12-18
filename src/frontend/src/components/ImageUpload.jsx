@@ -1,55 +1,10 @@
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { gql } from '@apollo/client';
 import { useMutation } from '@apollo/client/react';
+import { UPLOAD_IMAGE, UPLOAD_IMAGES, GET_IMAGES } from '../graphql/images';
+import Notification from './Notification';
 
-const UPLOAD_IMAGE = gql`
-  mutation UploadImage($file: Upload!) {
-    uploadImage(file: $file) {
-      id
-      filename
-      filePath
-      fileSize
-      latitude
-      longitude
-      captureTimestamp
-      uploadedAt
-    }
-  }
-`;
-
-const UPLOAD_IMAGES = gql`
-  mutation UploadImages($files: [Upload!]!) {
-    uploadImages(files: $files) {
-      id
-      filename
-      filePath
-      fileSize
-      latitude
-      longitude
-      captureTimestamp
-      uploadedAt
-    }
-  }
-`;
-
-const GET_IMAGES = gql`
-  query GetImages {
-    images {
-      id
-      filename
-      filePath
-      latitude
-      longitude
-      captureTimestamp
-      cameraMake
-      cameraModel
-      uploadedAt
-    }
-  }
-`;
-
-const ImageUpload = () => {
+const ImageUpload = ({ onUploaded = null }) => {
   const [uploadImage] = useMutation(UPLOAD_IMAGE, {
     refetchQueries: [{ query: GET_IMAGES }],
     awaitRefetchQueries: false, // Don't wait for refetch to complete
@@ -60,24 +15,35 @@ const ImageUpload = () => {
   });
 
   const [uploading, setUploading] = useState(false);
+  const [notification, setNotification] = useState(null);
+  const showNotification = (message, type = 'info', duration = 3000) => {
+    setNotification({ message, type, duration });
+  };
 
   const onDrop = async (acceptedFiles) => {
     setUploading(true);
 
     try {
       if (acceptedFiles.length === 1) {
-        await uploadImage({
+        const res = await uploadImage({
           variables: { file: acceptedFiles[0] }
         });
+        const uploaded = res?.data?.uploadImage || null;
+        if (uploaded && typeof onUploaded === 'function') {
+          onUploaded(uploaded);
+        }
       } else if (acceptedFiles.length > 1) {
         await uploadImages({
           variables: { files: acceptedFiles }
         });
       }
-      alert(`Successfully uploaded ${acceptedFiles.length} image(s)`);
+      // Avoid a blocking alert for single-image uploads since we auto-open the editor.
+      if (acceptedFiles.length !== 1) {
+        showNotification(`Successfully uploaded ${acceptedFiles.length} image(s)`, 'success');
+      }
     } catch (error) {
       console.error('Upload error:', error);
-      alert(`Upload failed: ${error.message}`);
+      showNotification(`Upload failed: ${error.message}`, 'error');
     } finally {
       setUploading(false);
     }
@@ -89,12 +55,22 @@ const ImageUpload = () => {
       'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
     },
     multiple: true,
+    maxFiles: 100,
+    maxSize: 2147483648,
     noClick: false,
     noKeyboard: false
   });
 
   return (
     <div {...getRootProps()} style={{ display: 'inline-block' }}>
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          duration={notification.duration}
+          onClose={() => setNotification(null)}
+        />
+      )}
       <input {...getInputProps()} />
       <button
         disabled={uploading}

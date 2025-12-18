@@ -28,6 +28,7 @@ build
 .env.local
 .env.*.local
 
+
 .vscode/
 .idea/
 *.swp
@@ -49,7 +50,14 @@ coverage/
 
 .env.defaults
 
+# Local app settings (contains secrets)
+src/backend/appsettings.json
+
+# Local runtime config (may contain secrets)
+src/backend/appsettings.json
+
 *~
 *.bak
 *.old
 
+appsettings.json

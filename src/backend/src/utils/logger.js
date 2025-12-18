@@ -15,7 +15,7 @@ export const logger = {
     if (!dbPool) {
       if (process.env.NODE_ENV !== 'test' && !warnedMissingDbPool) {
         warnedMissingDbPool = true;
-        // eslint-disable-next-line no-console
+         
         console.error('Logger: dbPool not provided. Log not written to DB.');
       }
       return;
@@ -32,7 +32,7 @@ export const logger = {
         client.release();
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.error('Logger: Failed to write to system_logs:', err, { level, eventType, message });
     }
   },

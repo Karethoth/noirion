@@ -1,33 +1,9 @@
 import React, { useState } from 'react';
-import { gql } from '@apollo/client';
 import { useQuery, useMutation } from '@apollo/client/react';
 import Notification from './Notification';
 import './EntityList.css';
-
-const GET_ENTITIES = gql`
-  query GetEntities($entityType: String, $limit: Int, $offset: Int) {
-    entities(entityType: $entityType, limit: $limit, offset: $offset) {
-      id
-      entityType
-      displayName
-      tags
-      createdAt
-      updatedAt
-      attributes {
-        id
-        attributeName
-        attributeValue
-        confidence
-      }
-    }
-  }
-`;
-
-const DELETE_ENTITY = gql`
-  mutation DeleteEntity($id: ID!) {
-    deleteEntity(id: $id)
-  }
-`;
+import { GET_ENTITIES, DELETE_ENTITY } from '../graphql/entities';
+import { formatMGRS } from '../utils/coordinates';
 
 const EntityList = ({ onSelectEntity, userRole, onRefetchReady }) => {
   const [entityTypeFilter, setEntityTypeFilter] = useState('');
@@ -82,6 +58,31 @@ const EntityList = ({ onSelectEntity, userRole, onRefetchReady }) => {
   if (error) return <div className="entity-list-error">Error loading entities: {error.message}</div>;
 
   const entities = data?.entities || [];
+
+  const extractLatLngFromAttributes = (attrs) => {
+    if (!Array.isArray(attrs)) return { lat: null, lng: null };
+    const byName = new Map();
+    for (const a of attrs) {
+      const key = String(a?.attributeName || '').trim().toLowerCase();
+      if (!key) continue;
+      byName.set(key, a);
+    }
+
+    const parseScalar = (v) => {
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+
+    const latAttr = byName.get('latitude') || byName.get('lat');
+    const lngAttr = byName.get('longitude') || byName.get('lng') || byName.get('lon');
+    const lat = parseScalar(latAttr?.attributeValue);
+    const lng = parseScalar(lngAttr?.attributeValue);
+    return { lat, lng };
+  };
 
   // Filter entities based on search query
   const filteredEntities = entities.filter(entity => {
@@ -160,16 +161,36 @@ const EntityList = ({ onSelectEntity, userRole, onRefetchReady }) => {
 
               {entity.attributes && entity.attributes.length > 0 && (
                 <div className="entity-item-attributes">
-                  {entity.attributes.slice(0, 3).map(attr => (
-                    <div key={attr.id} className="entity-attribute-preview">
-                      <span className="attr-name">{attr.attributeName}:</span>
-                      <span className="attr-value">
-                        {typeof attr.attributeValue === 'object'
-                          ? JSON.stringify(attr.attributeValue)
-                          : String(attr.attributeValue)}
-                      </span>
-                    </div>
-                  ))}
+                  {(() => {
+                    const { lat, lng } = extractLatLngFromAttributes(entity.attributes);
+                    const hasCoord = lat != null && lng != null;
+                    const filtered = entity.attributes.filter((a) => {
+                      const name = String(a?.attributeName || '').trim().toLowerCase();
+                      return name !== 'latitude' && name !== 'longitude' && name !== 'lat' && name !== 'lng' && name !== 'lon';
+                    });
+                    const previews = [];
+                    if (hasCoord) {
+                      previews.push(
+                        <div key="mgrs" className="entity-attribute-preview">
+                          <span className="attr-name">MGRS:</span>
+                          <span className="attr-value">{formatMGRS(lng, lat)}</span>
+                        </div>
+                      );
+                    }
+                    for (const attr of filtered.slice(0, hasCoord ? 2 : 3)) {
+                      previews.push(
+                        <div key={attr.id} className="entity-attribute-preview">
+                          <span className="attr-name">{attr.attributeName}:</span>
+                          <span className="attr-value">
+                            {typeof attr.attributeValue === 'object'
+                              ? JSON.stringify(attr.attributeValue)
+                              : String(attr.attributeValue)}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return previews;
+                  })()}
                   {entity.attributes.length > 3 && (
                     <div className="entity-attribute-more">
                       +{entity.attributes.length - 3} more

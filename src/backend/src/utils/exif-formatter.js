@@ -153,7 +153,6 @@ export function getFlashDescription(flash) {
   // Flash is a bitfield
   const fired = (flash & 0x01) !== 0;
   const mode = (flash >> 3) & 0x03;
-  const returned = (flash >> 1) & 0x03;
   
   if (!fired) return 'Flash did not fire';
   

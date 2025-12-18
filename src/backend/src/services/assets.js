@@ -3,11 +3,343 @@ import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import exifr from 'exifr';
+import { logger } from '../utils/logger.js';
 
 export class AssetsService {
   constructor(dbPool) {
     this.dbPool = dbPool;
     this.uploadDir = path.join(process.cwd(), 'uploads');
+  }
+
+  async getAssetsByEntityId(entityId, { limit = 200, offset = 0 } = {}) {
+    const client = await this.dbPool.connect();
+    try {
+      const lim = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(2000, Number(limit))) : 200;
+      const off = Number.isFinite(Number(offset)) ? Math.max(0, Number(offset)) : 0;
+
+      const result = await client.query(
+        `
+          WITH connected_entities AS (
+            SELECT $1::uuid AS id
+            UNION
+            SELECT el.from_entity AS id
+            FROM entity_links el
+            WHERE el.to_entity = $1::uuid
+            UNION
+            SELECT el.to_entity AS id
+            FROM entity_links el
+            WHERE el.from_entity = $1::uuid
+          )
+          SELECT DISTINCT a.*,
+                 e.capture_timestamp, e.camera_make, e.camera_model,
+                 e.orientation, e.width, e.height, e.altitude,
+                 e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+                 e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+                 e.metering_mode, e.white_balance, e.color_space,
+                 e.lens, e.software, e.copyright, e.artist,
+                 e.exif_raw,
+                 m.display_name as manual_display_name,
+                 m.capture_timestamp as manual_capture_timestamp,
+                 m.altitude as manual_altitude,
+                 ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+                 ST_X(COALESCE(m.gps, e.gps)) as longitude
+          FROM assets a
+          LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+          LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
+          WHERE a.deleted_at IS NULL
+            AND a.content_type LIKE 'image/%'
+            AND (
+              EXISTS (
+                SELECT 1
+                FROM annotations an
+                JOIN annotation_entity_links ael ON ael.annotation_id = an.id
+                WHERE an.asset_id = a.id
+                  AND ael.entity_id IN (SELECT id FROM connected_entities)
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM presences p
+                JOIN presence_entities pe ON pe.presence_id = p.id
+                WHERE p.source_asset = a.id
+                  AND pe.entity_id IN (SELECT id FROM connected_entities)
+              )
+            )
+          ORDER BY a.uploaded_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [entityId, lim, off]
+      );
+
+      return result.rows.map((row) => this.formatAssetResult(row));
+    } finally {
+      client.release();
+    }
+  }
+
+  async _syncAutoPresencesForAssetWithClient(client, assetId, userId = null) {
+    // Build observation info using manual override first, then EXIF.
+    const infoRes = await client.query(
+      `
+        SELECT
+          a.id as asset_id,
+          a.uploaded_at,
+          COALESCE(m.capture_timestamp, e.capture_timestamp, a.uploaded_at) as observed_at,
+          ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+          ST_X(COALESCE(m.gps, e.gps)) as longitude,
+          COALESCE(a.metadata, '{}'::jsonb) as metadata
+        FROM assets a
+        LEFT JOIN asset_metadata_manual m ON m.asset_id = a.id
+        LEFT JOIN asset_metadata_exif e ON e.asset_id = a.id
+        WHERE a.id = $1 AND a.deleted_at IS NULL
+      `,
+      [assetId]
+    );
+
+    if (infoRes.rows.length === 0) return;
+
+    const info = infoRes.rows[0];
+    const observedAt = info.observed_at ? new Date(info.observed_at) : null;
+    const latitude = info.latitude !== null && info.latitude !== undefined ? Number(info.latitude) : null;
+    const longitude = info.longitude !== null && info.longitude !== undefined ? Number(info.longitude) : null;
+    const hasPoint = Number.isFinite(latitude) && Number.isFinite(longitude);
+
+    // Time is required for any timeline presence. If we can't determine it, bail.
+    if (!observedAt || Number.isNaN(observedAt.getTime())) return;
+
+    const ignoredIdsRaw = info?.metadata?.autoPresenceIgnoreEntityIds;
+    const ignored = new Set(
+      Array.isArray(ignoredIdsRaw) ? ignoredIdsRaw.map((x) => String(x)) : []
+    );
+
+    const entityRes = await client.query(
+      `
+        SELECT DISTINCT ael.entity_id
+        FROM annotations an
+        JOIN annotation_entity_links ael ON ael.annotation_id = an.id
+        WHERE an.asset_id = $1
+      `,
+      [assetId]
+    );
+
+    for (const row of entityRes.rows) {
+      const entityId = row.entity_id;
+      if (!entityId) continue;
+
+      const isIgnored = ignored.has(String(entityId));
+
+      if (isIgnored) {
+        await client.query(
+          `
+            DELETE FROM presences p
+            USING presence_entities pe
+            WHERE p.id = pe.presence_id
+              AND p.source_asset = $1
+              AND p.source_type = $2
+              AND pe.entity_id = $3
+          `,
+          [assetId, 'annotation_entity_link', entityId]
+        );
+        continue;
+      }
+
+      const existingPresence = await client.query(
+        `
+          SELECT p.id
+          FROM presences p
+          JOIN presence_entities pe ON pe.presence_id = p.id
+          WHERE p.source_asset = $1
+            AND p.source_type = $2
+            AND pe.entity_id = $3
+          LIMIT 1
+        `,
+        [assetId, 'annotation_entity_link', entityId]
+      );
+
+      if (existingPresence.rows.length === 0) {
+        if (!hasPoint) {
+          // No coordinates: don't create any new auto-presence.
+          continue;
+        }
+        const presenceInsert = await client.query(
+          `
+            INSERT INTO presences (
+              observed_at,
+              observed_by,
+              source_asset,
+              source_type,
+              geom,
+              notes,
+              metadata
+            ) VALUES (
+              $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7, $8
+            )
+            RETURNING id
+          `,
+          [
+            observedAt,
+            userId || null,
+            assetId,
+            'annotation_entity_link',
+            longitude,
+            latitude,
+            null,
+            JSON.stringify({ autoFromAsset: true })
+          ]
+        );
+
+        const presenceId = presenceInsert.rows[0].id;
+        await client.query(
+          `
+            INSERT INTO presence_entities (presence_id, entity_id, role, confidence)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (presence_id, entity_id) DO NOTHING
+          `,
+          [presenceId, entityId, null, 1.0]
+        );
+      } else {
+        // Keep any existing notes, but ensure time/geom are up to date.
+        if (hasPoint) {
+          await client.query(
+            `
+              UPDATE presences
+              SET
+                observed_at = $2,
+                geom = ST_SetSRID(ST_MakePoint($3, $4), 4326),
+                metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id, observedAt, longitude, latitude]
+          );
+        } else {
+          await client.query(
+            `
+              UPDATE presences
+              SET
+                observed_at = $2,
+                geom = NULL,
+                metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id, observedAt]
+          );
+        }
+      }
+    }
+  }
+
+  async setAssetAutoPresenceIgnoredEntities(assetId, ignoredEntityIds = [], userId = null) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const normalized = Array.isArray(ignoredEntityIds)
+        ? ignoredEntityIds.filter(Boolean).map((x) => String(x))
+        : [];
+
+      await client.query(
+        `
+          UPDATE assets
+          SET metadata = jsonb_set(
+            COALESCE(metadata, '{}'::jsonb),
+            '{autoPresenceIgnoreEntityIds}',
+            $2::jsonb,
+            true
+          )
+          WHERE id = $1 AND deleted_at IS NULL
+        `,
+        [assetId, JSON.stringify(normalized)]
+      );
+
+      // Sync auto-presences after ignore list update.
+      await this._syncAutoPresencesForAssetWithClient(client, assetId, userId);
+
+      await client.query('COMMIT');
+      return await this.getAssetById(assetId);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error('setAssetAutoPresenceIgnoredEntities failed', err);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async setAssetAiAnalysis(assetId, aiAnalysis) {
+    const client = await this.dbPool.connect();
+    try {
+      await client.query(
+        `UPDATE assets
+         SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{aiAnalysis}', $2::jsonb, true)
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [assetId, JSON.stringify(aiAnalysis || {})]
+      );
+      return await this.getAssetById(assetId);
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateAssetManualMetadata(
+    assetId,
+    { displayName, latitude, longitude, altitude, captureTimestamp } = {},
+    userId = null
+  ) {
+    const client = await this.dbPool.connect();
+    try {
+      // Validate coordinates if provided
+      const hasLat = latitude !== undefined && latitude !== null && latitude !== '';
+      const hasLng = longitude !== undefined && longitude !== null && longitude !== '';
+      if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
+        throw new Error('Both latitude and longitude must be provided together');
+      }
+
+      const displayNameNorm = displayName === '' ? null : displayName;
+      const altitudeNorm = altitude === '' ? null : altitude;
+      const captureNorm = captureTimestamp === '' ? null : captureTimestamp;
+
+      const params = [assetId, displayNameNorm, altitudeNorm, captureNorm, userId];
+      let gpsSql = 'NULL';
+      if (hasLat && hasLng) {
+        params.push(Number(longitude));
+        params.push(Number(latitude));
+        gpsSql = 'ST_SetSRID(ST_MakePoint($6, $7), 4326)';
+      }
+
+      await client.query(
+        `INSERT INTO asset_metadata_manual (
+          asset_id,
+          display_name,
+          altitude,
+          capture_timestamp,
+          gps,
+          created_by,
+          updated_by,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, ${gpsSql}, $5, $5, now()
+        )
+        ON CONFLICT (asset_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          altitude = EXCLUDED.altitude,
+          capture_timestamp = EXCLUDED.capture_timestamp,
+          gps = EXCLUDED.gps,
+          updated_by = EXCLUDED.updated_by,
+          updated_at = now()`,
+        params
+      );
+
+      // If the asset now has time+coords, ensure auto-presences exist for any linked entities.
+      try {
+        await this._syncAutoPresencesForAssetWithClient(client, assetId, userId);
+      } catch (e) {
+        // Don't block manual metadata edits if auto-presence sync fails.
+        logger.warn('Auto-presence sync failed during updateAssetManualMetadata', e);
+      }
+
+      return await this.getAssetById(assetId);
+    } finally {
+      client.release();
+    }
   }
 
   async ensureUploadDir() {
@@ -256,9 +588,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.sha256 = $1 AND a.deleted_at IS NULL
       `, [hash]);
       return result.rows[0] ? this.formatAssetResult(result.rows[0]) : null;
@@ -279,9 +616,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.deleted_at IS NULL
         AND a.content_type LIKE 'image/%'
         ORDER BY a.uploaded_at DESC
@@ -304,9 +646,14 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.id = $1 AND a.deleted_at IS NULL
       `, [id]);
       return result.rows[0] ? this.formatAssetResult(result.rows[0]) : null;
@@ -328,14 +675,19 @@ export class AssetsService {
                e.metering_mode, e.white_balance, e.color_space,
                e.lens, e.software, e.copyright, e.artist,
                e.exif_raw,
-               ST_Y(e.gps) as latitude, ST_X(e.gps) as longitude
+               m.display_name as manual_display_name,
+               m.capture_timestamp as manual_capture_timestamp,
+               m.altitude as manual_altitude,
+               ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+               ST_X(COALESCE(m.gps, e.gps)) as longitude
         FROM assets a
-        JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+        LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
         WHERE a.deleted_at IS NULL
         AND a.content_type LIKE 'image/%'
-        AND e.gps IS NOT NULL
+        AND COALESCE(m.gps, e.gps) IS NOT NULL
         AND ST_Within(
-          e.gps,
+          COALESCE(m.gps, e.gps),
           ST_MakeEnvelope($1, $2, $3, $4, 4326)
         )
         ORDER BY a.uploaded_at DESC
@@ -372,6 +724,12 @@ export class AssetsService {
         [id]
       );
 
+      // Delete manual metadata
+      await client.query(
+        `DELETE FROM asset_metadata_manual WHERE asset_id = $1`,
+        [id]
+      );
+
       // Finally delete the asset itself
       const result = await client.query(
         `DELETE FROM assets WHERE id = $1 RETURNING id`,
@@ -389,10 +747,12 @@ export class AssetsService {
   }
 
   formatAssetResult(row) {
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     return {
       id: row.id,
       filename: row.filename,
       originalName: row.filename, // assets table doesn't store original name separately
+      displayName: row.manual_display_name || row.filename,
       filePath: row.storage_path,
       sha256Hash: row.sha256,
       fileSize: parseInt(row.size_bytes),
@@ -401,7 +761,9 @@ export class AssetsService {
       height: row.height,
       latitude: row.latitude,
       longitude: row.longitude,
-      altitude: row.altitude ? parseFloat(row.altitude) : null,
+      altitude: (row.manual_altitude ?? row.altitude) !== null && (row.manual_altitude ?? row.altitude) !== undefined
+        ? parseFloat(row.manual_altitude ?? row.altitude)
+        : null,
       orientation: row.orientation,
 
       // Camera information
@@ -430,7 +792,9 @@ export class AssetsService {
       whiteBalance: row.white_balance,
 
       // Timestamps
-      captureTimestamp: row.capture_timestamp?.toISOString(),
+      captureTimestamp: (row.manual_capture_timestamp || row.capture_timestamp)
+        ? new Date(row.manual_capture_timestamp || row.capture_timestamp).toISOString()
+        : null,
       uploadedAt: row.uploaded_at?.toISOString(),
       uploadedBy: row.uploader_id,
 
@@ -441,7 +805,8 @@ export class AssetsService {
 
       // Full EXIF data for advanced use
       exifData: row.exif_raw || {},
-      metadata: row.metadata || {}
+      metadata: metadata,
+      aiAnalysis: metadata.aiAnalysis || null
     };
   }
 }
