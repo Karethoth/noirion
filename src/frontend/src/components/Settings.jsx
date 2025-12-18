@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useApolloClient, useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
+import { useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import Notification from './Notification';
 import ConfirmModal from './ConfirmModal';
@@ -13,10 +13,8 @@ import {
 import { DEV_RESET_DATABASE } from '../graphql/admin';
 import { setAiConfig } from '../utils/aiConfig';
 import HomeLocationPickerModal from './HomeLocationPickerModal';
-import { GET_IMAGE_IDS } from '../graphql/images';
 
 const Settings = () => {
-  const apolloClient = useApolloClient();
   const { data, loading, error, refetch } = useQuery(GET_PROJECT_SETTINGS, {
     fetchPolicy: 'network-only',
   });
@@ -119,22 +117,6 @@ const Settings = () => {
     const modelId = String(lmStudioModel || '').trim();
     if (!modelId) {
       showNotification('Select a model first', 'error');
-      return;
-    }
-
-    // Require at least one uploaded asset so the backend can run a real-image vision probe.
-    try {
-      const imgRes = await apolloClient.query({
-        query: GET_IMAGE_IDS,
-        fetchPolicy: 'network-only',
-      });
-      const imgs = imgRes?.data?.images;
-      if (!Array.isArray(imgs) || imgs.length === 0) {
-        showNotification('Upload at least one asset before running a vision test', 'error', 7000);
-        return;
-      }
-    } catch (e) {
-      showNotification(e?.message || 'Failed to check assets before vision test', 'error', 7000);
       return;
     }
 

@@ -31,14 +31,6 @@ export const GET_IMAGES = gql`
   }
 `;
 
-export const GET_IMAGE_IDS = gql`
-  query GetImageIds {
-    images {
-      id
-    }
-  }
-`;
-
 export const GET_IMAGE = gql`
   query GetImage($id: ID!) {
     image(id: $id) {
