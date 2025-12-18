@@ -108,7 +108,7 @@ const Settings = () => {
     setLmStudioModelsOpen(true);
     try {
       await fetchLmStudioModels({ variables: { visionOnly: false } });
-    } catch (e) {
+    } catch {
       // handled by lmModelsError
     }
   };

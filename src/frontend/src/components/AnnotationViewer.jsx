@@ -565,7 +565,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   };
 
   // Mouse wheel for zoom
-  const handleWheel = (e) => {
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     const delta = e.deltaY < 0 ? 1.1 : 0.9;
@@ -580,14 +580,14 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
       // Adjust pan offset to zoom towards mouse
       const scaleRatio = newScale / scale;
-      setPanOffset({
-        x: mouseX - (mouseX - panOffset.x) * scaleRatio,
-        y: mouseY - (mouseY - panOffset.y) * scaleRatio
-      });
+      setPanOffset((prev) => ({
+        x: mouseX - (mouseX - prev.x) * scaleRatio,
+        y: mouseY - (mouseY - prev.y) * scaleRatio
+      }));
     }
 
     setScale(newScale);
-  };
+  }, [scale]);
 
   // Ensure wheel preventDefault actually works (React wheel handlers may be passive in some setups).
   useEffect(() => {

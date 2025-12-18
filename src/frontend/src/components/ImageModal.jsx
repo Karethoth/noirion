@@ -133,7 +133,6 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
     setPresencePromptWorking(true);
     try {
       for (const plate of presencePromptSelected) {
-        // eslint-disable-next-line no-await-in-loop
         await linkVehiclePlateToAnnotation({
           variables: {
             annotationId: presencePrompt.annotationId,

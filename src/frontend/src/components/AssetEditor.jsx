@@ -146,7 +146,6 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
     setPresencePromptWorking(true);
     try {
       for (const plate of presencePromptSelected) {
-        // eslint-disable-next-line no-await-in-loop
         await linkVehiclePlateToAnnotation({
           variables: {
             annotationId: presencePrompt.annotationId,

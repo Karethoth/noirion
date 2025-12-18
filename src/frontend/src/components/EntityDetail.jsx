@@ -5,7 +5,7 @@ import EntitySearch from './EntitySearch';
 import TagPickerModal from './TagPickerModal';
 import './EntityDetail.css';
 import './TimelineView.css';
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
@@ -280,7 +280,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
         setLocationMGRS(formatMGRS(lngNum, latNum));
       }
     }
-  }, [isNewEntity, entity?.id]);
+  }, [isNewEntity, entity?.id, entity?.attributes]);
 
   const [createEntity, { loading: creating }] = useMutation(CREATE_ENTITY);
   const [updateEntity, { loading: updating }] = useMutation(UPDATE_ENTITY);

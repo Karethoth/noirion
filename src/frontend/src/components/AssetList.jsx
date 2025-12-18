@@ -23,6 +23,14 @@ import { buildAssetUrl } from '../utils/assetUrls';
 
 initLeafletDefaultMarkerIcons();
 
+function getTagsForImage(img) {
+  const tags = (img?.annotations || [])
+    .flatMap((a) => a?.tags || [])
+    .filter(Boolean)
+    .map((t) => String(t));
+  return Array.from(new Set(tags));
+}
+
 const AssetList = ({ readOnly = false, onEdit = null }) => {
   const { enabled: aiEnabled, model: aiModel } = useAiConfig();
   const apolloClient = useApolloClient();
@@ -107,14 +115,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
     return parseTagTokens(tagFilterRaw);
   }, [tagFilterRaw]);
 
-  function getTagsForImage(img) {
-    const tags = (img.annotations || [])
-      .flatMap((a) => a?.tags || [])
-      .filter(Boolean)
-      .map((t) => String(t));
-    return Array.from(new Set(tags));
-  }
-
   const formatTag = formatTagDisplay;
 
   const buildPresenceRows = (plates) => {
@@ -128,18 +128,16 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
     }));
   };
 
-  const computeTagCounts = (imgs) => {
+  const tagCounts = useMemo(() => {
     const counts = new Map();
-    for (const img of imgs || []) {
+    for (const img of assets || []) {
       const uniq = new Set(getTagsForImage(img).map((t) => String(t)));
       for (const t of uniq) {
         counts.set(t, (counts.get(t) || 0) + 1);
       }
     }
     return counts;
-  };
-
-  const tagCounts = useMemo(() => computeTagCounts(assets), [assets]);
+  }, [assets]);
   const topTags = useMemo(() => {
     const entries = Array.from(tagCounts.entries());
     entries.sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
@@ -252,7 +250,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
         try {
           for (let i = 0; i < ids.length; i += 1) {
             setBulkStatus(`Deleting ${i + 1}/${ids.length}…`);
-            // eslint-disable-next-line no-await-in-loop
             await deleteImage({ variables: { id: ids[i] } });
           }
           await refetch();
@@ -291,14 +288,12 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
           for (let i = 0; i < ids.length; i += 1) {
             const id = ids[i];
             setBulkStatus(`Analyzing ${i + 1}/${ids.length}…`);
-            // eslint-disable-next-line no-await-in-loop
             const res = await analyzeImage({ variables: { id, model: aiModel || null, persist: true } });
             const caption = (res?.data?.analyzeImage?.caption || '').trim();
             if (!caption) continue;
 
             const punchy = makePunchyName(caption);
             const nextName = punchy || caption.slice(0, 60);
-            // eslint-disable-next-line no-await-in-loop
             await updateImage({
               variables: {
                 id,
@@ -354,8 +349,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
             }
 
             setBulkStatus(`Tagging ${i + 1}/${ids.length}…`);
-
-            // eslint-disable-next-line no-await-in-loop
             const resp = await analyzeAnnotationDraft({
               variables: {
                 assetId: id,
@@ -391,7 +384,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
             if (targetAnn?.id) {
               const existingTags = (targetAnn?.tags || []).filter(Boolean);
               const merged = Array.from(new Set([...existingTags, ...tags]));
-              // eslint-disable-next-line no-await-in-loop
               await updateAnnotation({
                 variables: {
                   id: targetAnn.id,
@@ -406,7 +398,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
                 approvals.push({ assetId: id, annotationId: targetAnn.id, plates });
               }
             } else {
-              // eslint-disable-next-line no-await-in-loop
               const created = await createAnnotation({
                 variables: {
                   input: {
@@ -511,7 +502,6 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
       for (const row of selectedRows) {
         const plate = normalizePlate(row?.plate);
         if (!plate) continue;
-        // eslint-disable-next-line no-await-in-loop
         await linkVehiclePlateToAnnotation({
           variables: {
             annotationId: currentApproval.annotationId,

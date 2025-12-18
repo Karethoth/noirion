@@ -120,7 +120,6 @@ export const createUploadLink = (options) => {
       }
 
       if (DEBUG_GRAPHQL) {
-        // eslint-disable-next-line no-console
         console.log(
           `[${requestId}] -> ${operationName || 'anonymous'} uri=${uri} files=${files.size} timeoutMs=${GRAPHQL_TIMEOUT_MS}`
         );
@@ -140,7 +139,6 @@ export const createUploadLink = (options) => {
             const ms = Date.now() - start;
 
             if (DEBUG_GRAPHQL) {
-              // eslint-disable-next-line no-console
               console.log(`[${requestId}] <- ${operationName || 'anonymous'} status=${response.status} (${ms}ms)`);
             }
 
@@ -170,7 +168,6 @@ export const createUploadLink = (options) => {
         .catch((error) => {
           const ms = Date.now() - start;
           if (DEBUG_GRAPHQL) {
-            // eslint-disable-next-line no-console
             console.warn(`[${requestId}] xx ${operationName || 'anonymous'} failed (${ms}ms):`, error);
           }
 

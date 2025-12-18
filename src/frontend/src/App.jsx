@@ -188,7 +188,6 @@ function MainApp({ user, onLogout }) {
 
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

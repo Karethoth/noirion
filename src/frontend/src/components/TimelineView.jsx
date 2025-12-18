@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import { useQuery, useMutation } from '@apollo/client/react';
 import Notification from './Notification';
 import EntitySearch from './EntitySearch';
@@ -17,9 +17,6 @@ import { toDatetimeLocalValue } from '../utils/datetimeLocal';
 import { parseTagTokens } from '../utils/tagTokens';
 
 initLeafletDefaultMarkerIcons();
-
-export { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT };
-export { GET_PRESENCES };
 
 const TimelineView = ({
   userRole,
@@ -78,15 +75,14 @@ const TimelineView = ({
   const [deleteEvent] = useMutation(DELETE_EVENT, {
     onCompleted: () => refetch()
   });
+  const [updateEvent] = useMutation(UPDATE_EVENT, {
+    onCompleted: () => refetch()
+  });
 
   const [deletePresence] = useMutation(DELETE_PRESENCE, {
     onCompleted: () => {
       if (typeof refetchPresences === 'function') refetchPresences();
     }
-  });
-
-  const [updateEvent] = useMutation(UPDATE_EVENT, {
-    onCompleted: () => refetch()
   });
 
   const events = useMemo(() => {
@@ -238,18 +234,15 @@ const TimelineView = ({
     setFn((prev) => prev.filter((x) => x.entityId !== entityId));
   };
 
-  const { minTime, maxTime } = useMemo(() => {
+  const maxTime = useMemo(() => {
     const timestamps = [];
     for (const item of timelineItems) {
       if (!item.timestamp) continue;
       const t = new Date(item.timestamp).getTime();
       if (!Number.isNaN(t)) timestamps.push(t);
     }
-    if (timestamps.length === 0) return { minTime: null, maxTime: null };
-    return {
-      minTime: new Date(Math.min(...timestamps)),
-      maxTime: new Date(Math.max(...timestamps))
-    };
+    if (timestamps.length === 0) return null;
+    return new Date(Math.max(...timestamps));
   }, [timelineItems]);
 
   useEffect(() => {

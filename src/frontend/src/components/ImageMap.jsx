@@ -173,9 +173,7 @@ const ImageMap = ({
     if (!imagesLoading) return;
 
     const t = setTimeout(() => {
-      // eslint-disable-next-line no-console
       console.warn('[ImageMap] Images query still loading after 10s. Check Network tab and backend logs.');
-      // eslint-disable-next-line no-console
       console.warn('[ImageMap] VITE_API_URL=', import.meta.env.VITE_API_URL);
     }, 10000);
 
@@ -231,7 +229,6 @@ const ImageMap = ({
   });
   const hasInitializedBounds = useRef(false);
   const [mapInstance, setMapInstance] = useState(null);
-  const [mapZoom, setMapZoom] = useState(() => savedMapView?.zoom || 10);
   const [mapViewVersion, setMapViewVersion] = useState(0);
   const presenceMarkerRefs = useRef(new Map());
   const [pendingOpenPresenceId, setPendingOpenPresenceId] = useState(null);
@@ -301,7 +298,7 @@ const ImageMap = ({
     }
 
     const attemptOpen = () => {
-      const id = openPresenceRetryRef.current.lastId;
+      const id = retryState.lastId;
       if (!id) return;
 
       const presences = latestPresencesRef.current || [];
@@ -327,7 +324,7 @@ const ImageMap = ({
       }
 
       // Pan/zoom first (only once per open).
-      if (!openPresenceRetryRef.current.didFly) {
+      if (!retryState.didFly) {
         const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : 10;
         const nextZoom = Math.max(currentZoom || 10, 16);
         if (typeof map.flyTo === 'function') {
@@ -335,7 +332,7 @@ const ImageMap = ({
         } else if (typeof map.setView === 'function') {
           map.setView([found.latitude, found.longitude], nextZoom, { animate: true });
         }
-        openPresenceRetryRef.current.didFly = true;
+        retryState.didFly = true;
       }
 
       const marker = presenceMarkerRefs.current.get(id);
@@ -352,7 +349,7 @@ const ImageMap = ({
     };
 
     const scheduleRetry = () => {
-      const st = openPresenceRetryRef.current;
+      const st = retryState;
       if (st.timer) return;
       if (st.attempts >= 60) {
         // ~3 seconds max at 50ms intervals
@@ -369,10 +366,9 @@ const ImageMap = ({
     attemptOpen();
 
     return () => {
-      const st = openPresenceRetryRef.current;
-      if (st.timer) {
-        clearTimeout(st.timer);
-        st.timer = null;
+      if (retryState.timer) {
+        clearTimeout(retryState.timer);
+        retryState.timer = null;
       }
     };
   }, [pendingOpenPresenceId, onOpenPresenceHandled]);
@@ -847,24 +843,11 @@ const ImageMap = ({
     }
   };
 
-  // Calculate distance between two coordinates in meters (Haversine formula)
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in meters
-  };
-
   // Group images by pixel proximity at the current zoom.
   const imageGroups = useMemo(() => {
+    // Used as a "version bump" to force regrouping.
+    void mapViewVersion;
+
     const images = Array.isArray(imagesWithLocation) ? imagesWithLocation : [];
     if (!mapInstance || images.length === 0) {
       return images.map((img) => ({ lat: img.latitude, lng: img.longitude, images: [img] }));
@@ -1310,9 +1293,8 @@ const ImageMap = ({
         />
         <MapInstanceBridge onMap={setMapInstance} />
         <MapViewTracker
-          onViewChange={(map) => {
+          onViewChange={() => {
             try {
-              setMapZoom(map.getZoom());
               setMapViewVersion((v) => v + 1);
             } catch {
               // ignore

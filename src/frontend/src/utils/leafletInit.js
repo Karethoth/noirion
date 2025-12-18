@@ -8,7 +8,6 @@ export function initLeafletDefaultMarkerIcons() {
   didInit = true;
 
   // Fix for default markers in react-leaflet
-  // eslint-disable-next-line no-delete-var
   delete L.Icon.Default.prototype._getIconUrl;
   L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
 }

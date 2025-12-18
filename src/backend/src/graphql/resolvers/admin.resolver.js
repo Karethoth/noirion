@@ -37,7 +37,7 @@ const adminResolvers = {
       requirePermission(context.user, 'admin');
 
       if (args?.confirm !== CONFIRM_PHRASE) {
-        throw new Error(`Confirmation phrase mismatch. Pass confirm=\"${CONFIRM_PHRASE}\" to proceed.`);
+          throw new Error(`Confirmation phrase mismatch. Pass confirm="${CONFIRM_PHRASE}" to proceed.`);
       }
 
       const client = await context.dbPool.connect();

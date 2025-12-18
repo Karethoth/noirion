@@ -27,26 +27,26 @@ function attachPoolDebugEvents(p) {
   if (!DB_DEBUG || poolEventsAttached || !p) return;
   poolEventsAttached = true;
 
-  // eslint-disable-next-line no-console
+   
   console.log('[db] Pool debug enabled');
 
   p.on('connect', () => {
-    // eslint-disable-next-line no-console
+     
     console.log('[db] client connect');
   });
 
   p.on('acquire', () => {
-    // eslint-disable-next-line no-console
+     
     console.log('[db] client acquire');
   });
 
   p.on('remove', () => {
-    // eslint-disable-next-line no-console
+     
     console.log('[db] client remove');
   });
 
   p.on('error', (err) => {
-    // eslint-disable-next-line no-console
+     
     console.error('[db] pool error', err);
   });
 }
@@ -67,7 +67,7 @@ async function ensurePool() {
     max,
   });
   if (DB_DEBUG) {
-    // eslint-disable-next-line no-console
+     
     console.log('[db] creating pool with config:', {
       ...redactDbConfig(cfg.db),
       connectionTimeoutMillis,

@@ -4,6 +4,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT } from '../graphql/events';
+import { GET_PRESENCES } from '../graphql/presences';
 
 // Mock leaflet + react-leaflet so jsdom doesn't need map internals
 vi.mock('leaflet', () => {
@@ -49,7 +51,7 @@ function renderWithApollo(ui, mocks) {
 describe('TimelineView (Timeline)', () => {
   test('renders events list from query', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, GET_PRESENCES } = await loadTimelineModule();
+    const { default: TimelineView } = await loadTimelineModule();
 
     const mocks = [
       {
@@ -100,7 +102,7 @@ describe('TimelineView (Timeline)', () => {
 
   test('create validation: title required', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, GET_PRESENCES } = await loadTimelineModule();
+    const { default: TimelineView } = await loadTimelineModule();
 
     const mocks = [
       {
@@ -143,7 +145,7 @@ describe('TimelineView (Timeline)', () => {
 
   test('creates event (location optional) and shows success notification', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, CREATE_EVENT, GET_PRESENCES } = await loadTimelineModule();
+    const { default: TimelineView } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const occurredAtIso = new Date('2025-01-01T10:20').toISOString();
@@ -210,7 +212,7 @@ describe('TimelineView (Timeline)', () => {
 
   test('edits an event and saves via update mutation', async () => {
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, UPDATE_EVENT, GET_PRESENCES } = await loadTimelineModule();
+    const { default: TimelineView } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const mocks = [
@@ -308,7 +310,7 @@ describe('TimelineView (Timeline)', () => {
   test('deletes an event after confirmation', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
-    const { default: TimelineView, GET_EVENTS, DELETE_EVENT, GET_PRESENCES } = await loadTimelineModule();
+    const { default: TimelineView } = await loadTimelineModule();
 
     const before = '2025-02-01T00:00:00.000Z';
     const mocks = [

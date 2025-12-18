@@ -3,8 +3,6 @@ import annotationResolvers from '../src/graphql/resolvers/annotation.resolver.js
 
 describe('Annotation GraphQL Resolvers', () => {
   let mockContext;
-  let mockAnnotationService;
-  let mockAssetsService;
 
   beforeEach(() => {
     // Mock context with authenticated user

@@ -139,7 +139,7 @@ async function startServer() {
       const start = Date.now();
       res.on('finish', () => {
         const ms = Date.now() - start;
-        // eslint-disable-next-line no-console
+         
         console.log(`[${req.__requestId}] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms}ms)`);
       });
     }
@@ -168,20 +168,20 @@ async function startServer() {
     if (DEBUG_GRAPHQL) {
       try {
         const stats = await getPoolStats();
-        // eslint-disable-next-line no-console
+         
         console.log(`[${requestId}] dbPool stats total=${stats.total} idle=${stats.idle} waiting=${stats.waiting}`);
       } catch (e) {
-        // eslint-disable-next-line no-console
+         
         console.warn(`[${requestId}] dbPool stats unavailable:`, e?.message || e);
       }
 
-      // eslint-disable-next-line no-console
+       
       console.log(
         `[${requestId}] GraphQL request start op=${operationName || 'unknown'} hasQuery=${hasQuery} auth=${hasAuthHeader}`
       );
 
       watchdog = setTimeout(() => {
-        // eslint-disable-next-line no-console
+         
         console.warn(
           `[${requestId}] GraphQL still running after 15s op=${operationName || 'unknown'} (possible DB wait/hang)`
         );
@@ -213,7 +213,7 @@ async function startServer() {
           const user = getUserFromAuthHeader(authHeader);
 
           if (DEBUG_GRAPHQL) {
-            // eslint-disable-next-line no-console
+             
             console.log(
               `[${requestId}] GraphQL context userId=${user?.userId || 'null'} role=${user?.role || 'null'}`
             );
@@ -249,7 +249,7 @@ async function startServer() {
 
       if (DEBUG_GRAPHQL) {
         const ms = Date.now() - start;
-        // eslint-disable-next-line no-console
+         
         console.log(
           `[${requestId}] GraphQL request end op=${operationName || 'unknown'} status=${httpGraphQLResponse.status || 200} (${ms}ms)`
         );
@@ -268,7 +268,7 @@ async function startServer() {
       if (DEBUG_HTTP) {
         try {
           const stats = await getPoolStats();
-          // eslint-disable-next-line no-console
+           
           console.log(`[${req.__requestId || 'health'}] /health dbPool total=${stats.total} idle=${stats.idle} waiting=${stats.waiting}`);
         } catch {
           // ignore

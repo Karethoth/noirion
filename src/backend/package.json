@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon --legacy-watch index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "vitest",
     "migrate": "node scripts/run-migrations.js",
     "schema:generate": "node scripts/generate-schema.js",
@@ -22,13 +24,17 @@
     "graphql-type-json": "^0.3.2",
     "graphql-upload-minimal": "^1.6.1",
     "jsonwebtoken": "^9.0.2",
+    "lint": "^1.1.2",
     "multer": "^2.0.2",
     "pg": "^8.11.0",
     "sharp": "^0.34.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.18.0",
     "@graphql-inspector/cli": "^5.0.8",
     "@graphql-tools/schema": "^10.0.25",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
     "nodemon": "^3.0.1",
     "vitest": "^4.0.15"
   }

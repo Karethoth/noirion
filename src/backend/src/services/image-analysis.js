@@ -595,23 +595,6 @@ export class ImageAnalysisService {
     }
   }
 
-  async #cropBox(buffer, crop) {
-    const meta = await sharp(buffer).metadata();
-    const imgW = meta.width || 0;
-    const imgH = meta.height || 0;
-    if (!imgW || !imgH) return buffer;
-
-    const left = Math.min(Math.max(0, crop.left), imgW - 1);
-    const top = Math.min(Math.max(0, crop.top), imgH - 1);
-    const width = Math.min(crop.width, imgW - left);
-    const height = Math.min(crop.height, imgH - top);
-
-    if (width < 1 || height < 1) return buffer;
-    return await sharp(buffer)
-      .extract({ left, top, width, height })
-      .toBuffer();
-  }
-
   async #cropBoxWithDebug(buffer, crop) {
     const meta = await sharp(buffer).metadata();
     const imgW = meta.width || 0;

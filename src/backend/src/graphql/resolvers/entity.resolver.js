@@ -68,12 +68,12 @@ const entityResolvers = {
   },
 
   Entity: {
-    attributes: async (parent, args, context) => {
+    attributes: async (parent) => {
       // Attributes are already loaded in the service, so just return them
       return parent.attributes || [];
     },
 
-    tags: async (parent, args, context) => {
+    tags: async (parent) => {
       // Tags are already loaded in the service, so just return them
       return parent.tags || [];
     }
