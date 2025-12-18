@@ -8,6 +8,8 @@ export const GET_IMAGES = gql`
       displayName
       filePath
       fileSize
+      width
+      height
       latitude
       longitude
       captureTimestamp
@@ -22,6 +24,7 @@ export const GET_IMAGES = gql`
       }
       annotations {
         id
+        title
         tags
       }
     }

@@ -4,11 +4,88 @@ import { getConfig } from '../utils/config.js';
 
 let pool;
 
+const DB_DEBUG = ['1', 'true', 'yes', 'on'].includes(String(process.env.DB_DEBUG || '').toLowerCase());
+let poolEventsAttached = false;
+
+function toPositiveInt(value, fallback) {
+  const n = parseInt(String(value ?? ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function redactDbConfig(cfg) {
+  if (!cfg || typeof cfg !== 'object') return cfg;
+  const copy = { ...cfg };
+  if (copy.password) copy.password = '***';
+  if (copy.ssl && typeof copy.ssl === 'object') {
+    // Avoid dumping cert contents.
+    copy.ssl = { ...copy.ssl, key: copy.ssl.key ? '***' : undefined, cert: copy.ssl.cert ? '***' : undefined, ca: copy.ssl.ca ? '***' : undefined };
+  }
+  return copy;
+}
+
+function attachPoolDebugEvents(p) {
+  if (!DB_DEBUG || poolEventsAttached || !p) return;
+  poolEventsAttached = true;
+
+  // eslint-disable-next-line no-console
+  console.log('[db] Pool debug enabled');
+
+  p.on('connect', () => {
+    // eslint-disable-next-line no-console
+    console.log('[db] client connect');
+  });
+
+  p.on('acquire', () => {
+    // eslint-disable-next-line no-console
+    console.log('[db] client acquire');
+  });
+
+  p.on('remove', () => {
+    // eslint-disable-next-line no-console
+    console.log('[db] client remove');
+  });
+
+  p.on('error', (err) => {
+    // eslint-disable-next-line no-console
+    console.error('[db] pool error', err);
+  });
+}
+
 async function ensurePool() {
   if (pool) return pool;
   const cfg = await getConfig();
-  pool = new Pool(cfg.db);
+
+  // Prevent “hang forever” when the pool is exhausted or a connection can't be established.
+  const connectionTimeoutMillis = toPositiveInt(process.env.PG_CONNECT_TIMEOUT_MS, 15000);
+  const idleTimeoutMillis = toPositiveInt(process.env.PG_IDLE_TIMEOUT_MS, 30000);
+  const max = toPositiveInt(process.env.PG_POOL_MAX, 10);
+
+  pool = new Pool({
+    ...cfg.db,
+    connectionTimeoutMillis,
+    idleTimeoutMillis,
+    max,
+  });
+  if (DB_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log('[db] creating pool with config:', {
+      ...redactDbConfig(cfg.db),
+      connectionTimeoutMillis,
+      idleTimeoutMillis,
+      max,
+    });
+  }
+  attachPoolDebugEvents(pool);
   return pool;
+}
+
+export async function getPoolStats() {
+  const p = await ensurePool();
+  return {
+    total: p.totalCount,
+    idle: p.idleCount,
+    waiting: p.waitingCount,
+  };
 }
 
 async function testConnection() {

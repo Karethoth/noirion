@@ -50,6 +50,12 @@ coverage/
 
 .env.defaults
 
+# Local app settings (contains secrets)
+src/backend/appsettings.json
+
+# Local runtime config (may contain secrets)
+src/backend/appsettings.json
+
 *~
 *.bak
 *.old

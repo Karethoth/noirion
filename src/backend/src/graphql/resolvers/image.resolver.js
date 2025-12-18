@@ -78,7 +78,16 @@ const imageResolvers = {
       requireAuth(context.user);
       const assetsService = new AssetsService(context.dbPool);
       return await assetsService.getAssetsInArea(args.bounds);
-    }
+    },
+
+    imagesByEntity: async (parent, args, context) => {
+      requireAuth(context.user);
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.getAssetsByEntityId(args.entityId, {
+        limit: args.limit,
+        offset: args.offset,
+      });
+    },
   },
 
   Mutation: {

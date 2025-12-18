@@ -6,17 +6,15 @@ import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './TimelineView.css';
 import L from 'leaflet';
+import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
 import { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT } from '../graphql/events';
-import { GET_PRESENCES } from '../graphql/presences';
+import { GET_PRESENCES, DELETE_PRESENCE } from '../graphql/presences';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
+import TagPickerModal from './TagPickerModal';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
 
 export { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT };
 export { GET_PRESENCES };
@@ -82,6 +80,7 @@ const TimelineView = ({
   onTimeStartChange,
   ignoreTimeFilter = { events: false, presences: false, images: false },
   onIgnoreTimeFilterChange,
+  onOpenPresence = null,
 }) => {
   const canWrite = userRole === 'admin' || userRole === 'investigator';
   const [notification, setNotification] = useState(null);
@@ -90,6 +89,7 @@ const TimelineView = ({
   const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
   const [filterEntity, setFilterEntity] = useState(null); // { id, displayName, ... }
   const [filterTagsRaw, setFilterTagsRaw] = useState('');
+  const [isTagFilterModalOpen, setIsTagFilterModalOpen] = useState(false);
   const mapStyle = useMemo(() => {
     return localStorage.getItem('mapStyle') || 'day';
   }, []);
@@ -117,6 +117,7 @@ const TimelineView = ({
     data: presencesData,
     loading: presencesLoading,
     error: presencesError,
+    refetch: refetchPresences,
   } = useQuery(GET_PRESENCES, {
     variables: presencesVariables,
     fetchPolicy: 'cache-and-network'
@@ -127,6 +128,12 @@ const TimelineView = ({
   });
   const [deleteEvent] = useMutation(DELETE_EVENT, {
     onCompleted: () => refetch()
+  });
+
+  const [deletePresence] = useMutation(DELETE_PRESENCE, {
+    onCompleted: () => {
+      if (typeof refetchPresences === 'function') refetchPresences();
+    }
   });
 
   const [updateEvent] = useMutation(UPDATE_EVENT, {
@@ -175,6 +182,34 @@ const TimelineView = ({
       .filter(Boolean)
       .map((x) => x.toLowerCase());
   }, [filterTagsRaw]);
+
+  const tagCounts = useMemo(() => {
+    const counts = new Map();
+    for (const item of timelineItems) {
+      const linkedEntities =
+        item.kind === 'event'
+          ? item.event?.entities || []
+          : item.presence?.entities || [];
+
+      const tagsForItem = new Set(
+        linkedEntities
+          .flatMap((x) => x?.entity?.tags || [])
+          .filter(Boolean)
+          .map((t) => String(t))
+      );
+
+      for (const t of tagsForItem) {
+        counts.set(t, (counts.get(t) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [timelineItems]);
+
+  const topTags = useMemo(() => {
+    const entries = Array.from(tagCounts.entries());
+    entries.sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    return entries.map(([tag, count]) => ({ tag, count }));
+  }, [tagCounts]);
 
   const filteredTimelineItems = useMemo(() => {
     const entityId = filterEntity?.id || null;
@@ -470,6 +505,18 @@ const TimelineView = ({
     }
   };
 
+  const handleDeletePresence = async (id) => {
+    if (!canWrite) return;
+    if (!window.confirm('Delete this presence?')) return;
+    try {
+      await deletePresence({ variables: { id } });
+      showNotification('Presence deleted', 'success');
+    } catch (err) {
+      console.error('Error deleting presence:', err);
+      showNotification(`Failed to delete presence: ${err.message}`, 'error');
+    }
+  };
+
   const LocationPicker = ({ valueLat, valueLng, onPick }) => {
     useMapEvents({
       click(e) {
@@ -640,16 +687,20 @@ const TimelineView = ({
             id="timeline-tag-filter"
             type="text"
             value={filterTagsRaw}
-            onChange={(e) => setFilterTagsRaw(e.target.value)}
+            readOnly
+            onClick={() => setIsTagFilterModalOpen(true)}
+            onFocus={() => setIsTagFilterModalOpen(true)}
             placeholder="tag1, tag2"
           />
-          {filterTagsRaw.trim() && (
-            <div style={{ marginTop: '8px' }}>
-              <button className="timeline-secondary" onClick={() => setFilterTagsRaw('')}>
-                Clear tags
-              </button>
-            </div>
-          )}
+          <TagPickerModal
+            isOpen={isTagFilterModalOpen}
+            title="Filter by tags"
+            value={filterTagsRaw}
+            onChange={setFilterTagsRaw}
+            tagsWithCounts={topTags}
+            placeholder="tag1, tag2"
+            onClose={() => setIsTagFilterModalOpen(false)}
+          />
         </div>
       </div>
 
@@ -964,7 +1015,15 @@ const TimelineView = ({
           })();
 
           return (
-            <div key={item.id} className="timeline-event-item">
+            <div
+              key={item.id}
+              className={`timeline-event-item ${pr?.latitude != null && pr?.longitude != null ? 'timeline-clickable' : ''}`}
+              onClick={() => {
+                if (typeof onOpenPresence !== 'function') return;
+                if (pr?.latitude == null || pr?.longitude == null) return;
+                onOpenPresence(pr.id);
+              }}
+            >
               <div className="timeline-event-main">
                 <div className="timeline-event-title">{presenceTitle}</div>
                 <div className="timeline-event-meta">
@@ -979,6 +1038,21 @@ const TimelineView = ({
                 )}
                 {pr.notes && <div className="timeline-event-desc">{pr.notes}</div>}
               </div>
+
+              {canWrite && (
+                <div className="timeline-event-actions">
+                  <button
+                    className="timeline-danger"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeletePresence(pr.id);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

@@ -8,10 +8,15 @@ import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
+import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
 import { GET_IMAGES, DELETE_IMAGE } from '../graphql/images';
 import { GET_EVENTS, CREATE_EVENT } from '../graphql/events';
-import { GET_PRESENCES, CREATE_PRESENCE } from '../graphql/presences';
-import { GET_ENTITIES, CREATE_ENTITY, ADD_ENTITY_ATTRIBUTE } from '../graphql/entities';
+import { GET_PRESENCES, GET_PRESENCES_BY_ENTITY, CREATE_PRESENCE, DELETE_PRESENCE } from '../graphql/presences';
+import { GET_ENTITIES, GET_IMAGES_BY_ENTITY, CREATE_ENTITY, ADD_ENTITY_ATTRIBUTE } from '../graphql/entities';
+
+const DEBUG_GRAPHQL = ['1', 'true', 'yes', 'on'].includes(
+  String(import.meta.env.VITE_DEBUG_GRAPHQL || '').toLowerCase()
+);
 
 // Save/restore map position across component remounts
 // Store both in module scope and localStorage for persistence
@@ -29,11 +34,7 @@ try {
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
 
 
 function toDatetimeLocalValue(date) {
@@ -130,6 +131,39 @@ function MapStyleController({ style }) {
   return null;
 }
 
+function MapInstanceBridge({ onMap }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (typeof onMap === 'function') {
+      onMap(map);
+    }
+
+    return () => {
+      if (typeof onMap === 'function') {
+        onMap(null);
+      }
+    };
+  }, [map, onMap]);
+
+  return null;
+}
+
+function MapViewTracker({ onViewChange }) {
+  const map = useMap();
+
+  useMapEvents({
+    zoomend() {
+      if (typeof onViewChange === 'function') onViewChange(map);
+    },
+    moveend() {
+      if (typeof onViewChange === 'function') onViewChange(map);
+    },
+  });
+
+  return null;
+}
+
 // Map style configurations
 const MAP_STYLES = {
   day: {
@@ -157,11 +191,55 @@ const ImageMap = ({
   onEditImage = null,
   openImageId = null,
   onOpenImageHandled = null,
+  openPresenceId = null,
+  onOpenPresenceHandled = null,
 }) => {
-  const { loading, error, data } = useQuery(GET_IMAGES, {
-    fetchPolicy: 'cache-and-network', // Use cache first, then update in background
-    nextFetchPolicy: 'cache-first', // After first fetch, prefer cache
+  const [filterEntity, setFilterEntity] = useState(null); // { id, displayName, ... }
+  const filterEntityId = filterEntity?.id || null;
+  const [filterTagsRaw, setFilterTagsRaw] = useState('');
+
+  const filterTagTokens = useMemo(() => {
+    return (filterTagsRaw || '')
+      .split(/[\s,]+/g)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((x) => x.toLowerCase());
+  }, [filterTagsRaw]);
+
+  const imagesQuery = filterEntityId ? GET_IMAGES_BY_ENTITY : GET_IMAGES;
+  const imagesVariables = filterEntityId
+    ? { entityId: filterEntityId, limit: 2000, offset: 0 }
+    : undefined;
+
+  const {
+    loading: imagesLoading,
+    error: imagesError,
+    data: imagesData,
+    refetch: refetchImages,
+  } = useQuery(imagesQuery, {
+    variables: imagesVariables,
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
   });
+
+  const allImages = useMemo(() => {
+    if (filterEntityId) return imagesData?.imagesByEntity || [];
+    return imagesData?.images || [];
+  }, [imagesData?.images, imagesData?.imagesByEntity, filterEntityId]);
+
+  useEffect(() => {
+    if (!DEBUG_GRAPHQL) return;
+    if (!imagesLoading) return;
+
+    const t = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.warn('[ImageMap] Images query still loading after 10s. Check Network tab and backend logs.');
+      // eslint-disable-next-line no-console
+      console.warn('[ImageMap] VITE_API_URL=', import.meta.env.VITE_API_URL);
+    }, 10000);
+
+    return () => clearTimeout(t);
+  }, [imagesLoading]);
 
   const eventsVariables = useMemo(() => {
     if (ignoreTimeFilter?.events) return { before: null, after: null };
@@ -177,8 +255,17 @@ const ImageMap = ({
     variables: eventsVariables,
     fetchPolicy: 'cache-and-network'
   });
-  const { data: presencesData, refetch: refetchPresences } = useQuery(GET_PRESENCES, {
-    variables: presencesVariables,
+
+  const presencesQuery = filterEntityId ? GET_PRESENCES_BY_ENTITY : GET_PRESENCES;
+  const presencesQueryVariables = filterEntityId
+    ? { entityId: filterEntityId, limit: 2000, offset: 0 }
+    : presencesVariables;
+
+  const {
+    data: presencesData,
+    refetch: refetchPresences,
+  } = useQuery(presencesQuery, {
+    variables: presencesQueryVariables,
     fetchPolicy: 'cache-and-network'
   });
   const { data: locationsData, refetch: refetchLocations } = useQuery(GET_ENTITIES, {
@@ -192,6 +279,7 @@ const ImageMap = ({
     }
   });
   const [createPresence] = useMutation(CREATE_PRESENCE);
+  const [deletePresence] = useMutation(DELETE_PRESENCE);
   const [createEntity] = useMutation(CREATE_ENTITY);
   const [addEntityAttribute] = useMutation(ADD_ENTITY_ATTRIBUTE);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -201,12 +289,19 @@ const ImageMap = ({
     return localStorage.getItem('mapStyle') || 'day';
   });
   const hasInitializedBounds = useRef(false);
-  const mapRef = useRef(null);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [mapZoom, setMapZoom] = useState(() => savedMapView?.zoom || 10);
+  const [mapViewVersion, setMapViewVersion] = useState(0);
+  const presenceMarkerRefs = useRef(new Map());
+  const [pendingOpenPresenceId, setPendingOpenPresenceId] = useState(null);
+  const latestPresencesRef = useRef([]);
+  const latestMapInstanceRef = useRef(null);
+  const openPresenceRetryRef = useRef({ timer: null, attempts: 0, lastId: null, didFly: false });
 
   // External request to open an image (e.g. immediately after upload).
   useEffect(() => {
     if (!openImageId) return;
-    const images = data?.images;
+    const images = allImages;
     if (!Array.isArray(images) || images.length === 0) return;
 
     const found = images.find((img) => img?.id === openImageId);
@@ -217,7 +312,124 @@ const ImageMap = ({
     if (typeof onOpenImageHandled === 'function') {
       onOpenImageHandled(openImageId);
     }
-  }, [openImageId, data?.images, onOpenImageHandled]);
+  }, [openImageId, allImages, onOpenImageHandled]);
+
+  useEffect(() => {
+    latestPresencesRef.current = Array.isArray(presencesData?.presences) ? presencesData.presences : [];
+  }, [presencesData?.presences]);
+
+  useEffect(() => {
+    latestMapInstanceRef.current = mapInstance || null;
+  }, [mapInstance]);
+
+  // External request to open a presence (e.g. from Timeline click).
+  // We store it as pending so we can handle timing (data/markers may not be ready yet).
+  useEffect(() => {
+    if (!openPresenceId) return;
+    setPendingOpenPresenceId(openPresenceId);
+  }, [openPresenceId]);
+
+  useEffect(() => {
+    const retryState = openPresenceRetryRef.current;
+
+    if (!pendingOpenPresenceId) {
+      if (retryState.timer) {
+        clearTimeout(retryState.timer);
+        retryState.timer = null;
+      }
+      retryState.attempts = 0;
+      retryState.lastId = null;
+      retryState.didFly = false;
+      return;
+    }
+
+    // Reset retry state when the target presence changes.
+    if (retryState.lastId !== pendingOpenPresenceId) {
+      if (retryState.timer) {
+        clearTimeout(retryState.timer);
+        retryState.timer = null;
+      }
+      retryState.attempts = 0;
+      retryState.lastId = pendingOpenPresenceId;
+      retryState.didFly = false;
+    }
+
+    const attemptOpen = () => {
+      const id = openPresenceRetryRef.current.lastId;
+      if (!id) return;
+
+      const presences = latestPresencesRef.current || [];
+      const found = presences.find((p) => p?.id === id);
+      if (!found) {
+        scheduleRetry();
+        return;
+      }
+
+      if (found.latitude == null || found.longitude == null) {
+        showNotification('Presence has no location; cannot open on map', 'error');
+        if (typeof onOpenPresenceHandled === 'function') {
+          onOpenPresenceHandled(id);
+        }
+        setPendingOpenPresenceId(null);
+        return;
+      }
+
+      const map = latestMapInstanceRef.current;
+      if (!map) {
+        scheduleRetry();
+        return;
+      }
+
+      // Pan/zoom first (only once per open).
+      if (!openPresenceRetryRef.current.didFly) {
+        const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : 10;
+        const nextZoom = Math.max(currentZoom || 10, 16);
+        if (typeof map.flyTo === 'function') {
+          map.flyTo([found.latitude, found.longitude], nextZoom, { animate: true, duration: 0.6 });
+        } else if (typeof map.setView === 'function') {
+          map.setView([found.latitude, found.longitude], nextZoom, { animate: true });
+        }
+        openPresenceRetryRef.current.didFly = true;
+      }
+
+      const marker = presenceMarkerRefs.current.get(id);
+      if (!marker || typeof marker.openPopup !== 'function') {
+        scheduleRetry();
+        return;
+      }
+
+      marker.openPopup();
+      if (typeof onOpenPresenceHandled === 'function') {
+        onOpenPresenceHandled(id);
+      }
+      setPendingOpenPresenceId(null);
+    };
+
+    const scheduleRetry = () => {
+      const st = openPresenceRetryRef.current;
+      if (st.timer) return;
+      if (st.attempts >= 60) {
+        // ~3 seconds max at 50ms intervals
+        st.timer = null;
+        return;
+      }
+      st.attempts += 1;
+      st.timer = setTimeout(() => {
+        st.timer = null;
+        attemptOpen();
+      }, 50);
+    };
+
+    attemptOpen();
+
+    return () => {
+      const st = openPresenceRetryRef.current;
+      if (st.timer) {
+        clearTimeout(st.timer);
+        st.timer = null;
+      }
+    };
+  }, [pendingOpenPresenceId, onOpenPresenceHandled]);
 
   const [notification, setNotification] = useState(null);
   const showNotification = (message, type = 'info') => {
@@ -225,6 +437,22 @@ const ImageMap = ({
   };
 
   const canWrite = userRole === 'admin' || userRole === 'investigator';
+
+  const handleDeletePresence = async (presenceId) => {
+    if (!canWrite) return;
+    if (!presenceId) return;
+    if (!window.confirm('Delete this presence?')) return;
+    try {
+      await deletePresence({ variables: { id: presenceId } });
+      if (refetchPresences) {
+        await refetchPresences();
+      }
+      showNotification('Presence deleted', 'success');
+    } catch (err) {
+      console.error('Error deleting presence:', err);
+      showNotification(`Failed to delete presence: ${err.message}`, 'error');
+    }
+  };
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [editKind, setEditKind] = useState('event'); // 'event' | 'presence' | 'location'
@@ -248,7 +476,7 @@ const ImageMap = ({
 
   // Memoize images with location to avoid recreating on every render
   const imagesWithLocation = useMemo(() => {
-    const images = data?.images?.filter(img => img.latitude && img.longitude) || [];
+    const images = allImages?.filter(img => img.latitude && img.longitude) || [];
 
     if (ignoreTimeFilter?.images) return images;
 
@@ -260,7 +488,7 @@ const ImageMap = ({
 
     if (beforeMs == null && afterMs == null) return images;
 
-    return images.filter((img) => {
+    const timeFiltered = images.filter((img) => {
       const t = img.captureTimestamp || img.uploadedAt;
       if (!t) return false;
       const ms = new Date(t).getTime();
@@ -269,7 +497,17 @@ const ImageMap = ({
       if (afterMs != null && ms < afterMs) return false;
       return true;
     });
-  }, [data?.images, ignoreTimeFilter?.images, timeCursor, timeStart]);
+
+    if (filterTagTokens.length === 0) return timeFiltered;
+
+    return timeFiltered.filter((img) => {
+      const tags = (img?.annotations || [])
+        .flatMap((a) => a?.tags || [])
+        .filter(Boolean)
+        .map((t) => String(t).toLowerCase());
+      return filterTagTokens.some((needle) => tags.some((tag) => tag.includes(needle)));
+    });
+  }, [allImages, ignoreTimeFilter?.images, timeCursor, timeStart, filterTagTokens]);
 
   const eventIcon = useMemo(() => {
     return L.divIcon({
@@ -315,8 +553,46 @@ const ImageMap = ({
   }, [eventsData?.events]);
 
   const presencesWithLocation = useMemo(() => {
-    return (presencesData?.presences || []).filter((p) => p.latitude != null && p.longitude != null);
-  }, [presencesData?.presences]);
+    const raw = filterEntityId
+      ? (presencesData?.presencesByEntity || [])
+      : (presencesData?.presences || []);
+
+    // Apply time filtering consistently even when using presencesByEntity.
+    const beforeMs = !ignoreTimeFilter?.presences && timeCursor ? new Date(timeCursor).getTime() : null;
+    const afterMs = !ignoreTimeFilter?.presences && timeStart ? new Date(timeStart).getTime() : null;
+
+    const timeFiltered = raw.filter((p) => {
+      if (p.latitude == null || p.longitude == null) return false;
+
+      if (beforeMs == null && afterMs == null) return true;
+
+      const t = p.observedAt;
+      if (!t) return false;
+      const ms = new Date(t).getTime();
+      if (Number.isNaN(ms)) return false;
+      if (beforeMs != null && ms > beforeMs) return false;
+      if (afterMs != null && ms < afterMs) return false;
+      return true;
+    });
+
+    if (filterTagTokens.length === 0) return timeFiltered;
+
+    return timeFiltered.filter((p) => {
+      const tags = (p?.entities || [])
+        .flatMap((pe) => pe?.entity?.tags || [])
+        .filter(Boolean)
+        .map((t) => String(t).toLowerCase());
+      return filterTagTokens.some((needle) => tags.some((tag) => tag.includes(needle)));
+    });
+  }, [
+    presencesData?.presences,
+    presencesData?.presencesByEntity,
+    filterEntityId,
+    ignoreTimeFilter?.presences,
+    timeCursor,
+    timeStart,
+    filterTagTokens,
+  ]);
 
   const presencePaths = useMemo(() => {
     const byEntity = new Map();
@@ -641,40 +917,59 @@ const ImageMap = ({
     return R * c; // Distance in meters
   };
 
-  // Group images by proximity (within 50 meters)
+  // Group images by pixel proximity at the current zoom.
   const imageGroups = useMemo(() => {
+    const images = Array.isArray(imagesWithLocation) ? imagesWithLocation : [];
+    if (!mapInstance || images.length === 0) {
+      return images.map((img) => ({ lat: img.latitude, lng: img.longitude, images: [img] }));
+    }
+
+    // Guard against transient states where Leaflet's panes are not ready (or were torn down).
+    try {
+      if (typeof mapInstance.getPane !== 'function' || !mapInstance.getPane('mapPane')) {
+        return images.map((img) => ({ lat: img.latitude, lng: img.longitude, images: [img] }));
+      }
+    } catch {
+      return images.map((img) => ({ lat: img.latitude, lng: img.longitude, images: [img] }));
+    }
+
     const groups = [];
     const processed = new Set();
-    const CLUSTER_DISTANCE = 50; // meters
 
-    imagesWithLocation.forEach((image, idx) => {
-      if (processed.has(idx)) return;
+    // Rough pixel size of an image marker hit area.
+    const CLUSTER_PX = 36;
 
-      const group = {
-        lat: image.latitude,
-        lng: image.longitude,
-        images: [image]
-      };
+    for (let idx = 0; idx < images.length; idx += 1) {
+      if (processed.has(idx)) continue;
+
+      const image = images[idx];
+      const group = { lat: image.latitude, lng: image.longitude, images: [image] };
       processed.add(idx);
 
-      // Find all other images within CLUSTER_DISTANCE
-      imagesWithLocation.forEach((otherImage, otherIdx) => {
-        if (processed.has(otherIdx)) return;
+      let p1;
+      try {
+        p1 = mapInstance.latLngToContainerPoint([image.latitude, image.longitude]);
+      } catch {
+        // If Leaflet is mid-teardown or not ready, fall back to non-clustered behavior.
+        return images.map((img) => ({ lat: img.latitude, lng: img.longitude, images: [img] }));
+      }
 
-        const distance = calculateDistance(
-          image.latitude,
-          image.longitude,
-          otherImage.latitude,
-          otherImage.longitude
-        );
-
-        if (distance <= CLUSTER_DISTANCE) {
+      for (let otherIdx = idx + 1; otherIdx < images.length; otherIdx += 1) {
+        if (processed.has(otherIdx)) continue;
+        const otherImage = images[otherIdx];
+        let p2;
+        try {
+          p2 = mapInstance.latLngToContainerPoint([otherImage.latitude, otherImage.longitude]);
+        } catch {
+          continue;
+        }
+        const d = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        if (d <= CLUSTER_PX) {
           group.images.push(otherImage);
           processed.add(otherIdx);
         }
-      });
+      }
 
-      // Calculate center of group (average position)
       if (group.images.length > 1) {
         const latSum = group.images.reduce((sum, img) => sum + img.latitude, 0);
         const lngSum = group.images.reduce((sum, img) => sum + img.longitude, 0);
@@ -683,10 +978,10 @@ const ImageMap = ({
       }
 
       groups.push(group);
-    });
+    }
 
     return groups;
-  }, [imagesWithLocation]);
+  }, [imagesWithLocation, mapInstance, mapViewVersion]);
 
   const handleDeleteImage = async (imageId) => {
     if (!confirm('Are you sure you want to delete this image? This action cannot be undone.')) {
@@ -695,53 +990,22 @@ const ImageMap = ({
 
     try {
       await deleteImage({
-        variables: { id: imageId },
-        update: (cache) => {
-          // Read the current data from the cache
-          const existingData = cache.readQuery({ query: GET_IMAGES });
-
-          if (existingData) {
-            // Filter out the deleted image
-            const updatedImages = existingData.images.filter(img => img.id !== imageId);
-
-            // Write the updated data back to the cache
-            cache.writeQuery({
-              query: GET_IMAGES,
-              data: { images: updatedImages }
-            });
-          }
-        }
+        variables: { id: imageId }
       });
+
+      // Keep the current view consistent (unfiltered or filtered-by-entity).
+      if (typeof refetchImages === 'function') {
+        await refetchImages();
+      }
     } catch (err) {
-      alert(`Failed to delete image: ${err.message}`);
+      showNotification(`Failed to delete image: ${err.message}`, 'error');
     }
   };
 
-  if (loading) return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      fontSize: '18px',
-      color: '#666'
-    }}>
-      ⏳ Loading map and images...
-    </div>
-  );
-
-  if (error) return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      fontSize: '18px',
-      color: '#dc3545'
-    }}>
-      ⚠️ Error loading images: {error.message}
-    </div>
-  );
+  // Keep the map mounted even while data is loading; unmounting can cause Leaflet DOM reads
+  // during teardown (e.g. latLngToContainerPoint), which throws "_leaflet_pos" errors.
+  const showImagesLoadingOverlay = Boolean(imagesLoading);
+  const showImagesErrorOverlay = Boolean(imagesError);
 
   const currentStyle = MAP_STYLES[mapStyle];
 
@@ -758,6 +1022,20 @@ const ImageMap = ({
 
   const mapUiTheme = mapStyle === 'day' ? 'map-ui-light' : 'map-ui-dark';
 
+  // When filter changes (or map instance is restored), Leaflet can render gray tiles until it
+  // recalculates container size. Trigger a size invalidation on next frame.
+  useEffect(() => {
+    if (!mapInstance || typeof mapInstance.invalidateSize !== 'function') return;
+    const raf = requestAnimationFrame(() => {
+      try {
+        mapInstance.invalidateSize(false);
+      } catch {
+        // ignore
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [mapInstance, filterEntityId]);
+
   return (
     <div className={`map-overlay-root ${mapUiTheme}`} style={{ height: '100%', width: '100%', position: 'relative' }}>
       {notification && (
@@ -766,6 +1044,47 @@ const ImageMap = ({
           type={notification.type}
           onClose={() => setNotification(null)}
         />
+      )}
+
+      {showImagesLoadingOverlay && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(255, 255, 255, 0.65)',
+            zIndex: 1200,
+            pointerEvents: 'none',
+            color: '#555',
+            fontSize: '16px',
+            fontWeight: 600,
+          }}
+        >
+          ⏳ Loading images…
+        </div>
+      )}
+
+      {showImagesErrorOverlay && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(255, 255, 255, 0.75)',
+            zIndex: 1200,
+            padding: '16px',
+            textAlign: 'center',
+            color: '#b02a37',
+            fontSize: '14px',
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ Error loading images: {imagesError?.message}
+        </div>
       )}
 
       {/* Map Style Toggle */}
@@ -779,6 +1098,71 @@ const ImageMap = ({
             {style.name}
           </button>
         ))}
+      </div>
+
+      {/* Entity Filter Panel */}
+      <div className="map-edit-panel map-filter-panel">
+        <div className="map-edit-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{ fontWeight: 600 }}>Filter</div>
+            {filterEntityId && (
+              <button
+                type="button"
+                className="map-edit-toggle"
+                onClick={() => setFilterEntity(null)}
+                title="Clear entity filter"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="map-edit-body">
+          <div className="map-edit-row">
+            <label className="map-edit-label">Entity</label>
+            <div style={{ width: '100%' }}>
+              <EntitySearch
+                placeholder="Search entity to filter…"
+                onSelect={(entity) => {
+                  setFilterEntity(entity);
+                }}
+              />
+              {filterEntityId && (
+                <div className="map-edit-chips">
+                  <button
+                    className="map-edit-chip"
+                    onClick={() => setFilterEntity(null)}
+                    title="Clear"
+                  >
+                    {filterEntity?.displayName || filterEntityId} ✕
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="map-edit-row">
+            <label className="map-edit-label">Tags</label>
+            <input
+              className="map-edit-input"
+              value={filterTagsRaw}
+              onChange={(e) => setFilterTagsRaw(e.target.value)}
+              placeholder="comma or space separated"
+            />
+          </div>
+
+          {filterTagTokens.length > 0 && (
+            <div className="map-edit-row">
+              <div className="map-edit-hint">Tag filter active: {filterTagTokens.join(', ')}</div>
+            </div>
+          )}
+
+          {filterEntityId && (
+            <div className="map-edit-row">
+              <div className="map-edit-hint">Showing images + presences linked to the selected entity.</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Map Edit Panel */}
@@ -968,13 +1352,26 @@ const ImageMap = ({
         key="main-map"
         center={savedMapView?.center || [60.1699, 24.9384]}
         zoom={savedMapView?.zoom || 10}
+        maxZoom={22}
         style={{ height: '100%', width: '100%' }}
-        ref={mapRef}
       >
         <TileLayer
           key={mapStyle}
           attribution={currentStyle.attribution}
           url={currentStyle.url}
+          maxZoom={22}
+          maxNativeZoom={19}
+        />
+        <MapInstanceBridge onMap={setMapInstance} />
+        <MapViewTracker
+          onViewChange={(map) => {
+            try {
+              setMapZoom(map.getZoom());
+              setMapViewVersion((v) => v + 1);
+            } catch {
+              // ignore
+            }
+          }}
         />
         <MapStyleController style={mapStyle} />
         {!hasInitializedBounds.current && (
@@ -1028,6 +1425,13 @@ const ImageMap = ({
             key={`presence-${p.id}`}
             position={[p.latitude, p.longitude]}
             icon={presenceIcon}
+            ref={(ref) => {
+              if (!ref) {
+                presenceMarkerRefs.current.delete(p.id);
+                return;
+              }
+              presenceMarkerRefs.current.set(p.id, ref);
+            }}
           >
             <Popup maxWidth={300} minWidth={260}>
               <div style={{ padding: '4px' }}>
@@ -1055,6 +1459,20 @@ const ImageMap = ({
                 <div className="popup-coordinates" style={{ marginTop: '8px' }}>
                   📍 {formatMGRS(p.longitude, p.latitude)}
                 </div>
+
+                {canWrite && (
+                  <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="timeline-danger"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleDeletePresence(p.id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </Popup>
           </Marker>
@@ -1112,11 +1530,22 @@ const ImageMap = ({
             let lat = image.latitude;
             let lng = image.longitude;
 
-            if (count > 1) {
-              const radius = 0.0003; // ~33 meters - increased for better clickability
-              const angle = (imgIdx / count) * 2 * Math.PI;
-              lat += radius * Math.cos(angle);
-              lng += radius * Math.sin(angle);
+            // If we are clustered, scatter in pixels around group center.
+            if (count > 1 && mapInstance) {
+              try {
+                if (typeof mapInstance.getPane === 'function' && mapInstance.getPane('mapPane')) {
+                  const centerPt = mapInstance.latLngToContainerPoint([group.lat, group.lng]);
+                  const radiusPx = 28;
+                  const angle = (imgIdx / count) * 2 * Math.PI;
+                  const dx = radiusPx * Math.cos(angle);
+                  const dy = radiusPx * Math.sin(angle);
+                  const ll = mapInstance.containerPointToLatLng(L.point(centerPt.x + dx, centerPt.y + dy));
+                  lat = ll.lat;
+                  lng = ll.lng;
+                }
+              } catch {
+                // Keep original lat/lng.
+              }
             }
 
             markers.push(
@@ -1249,8 +1678,8 @@ const ImageMap = ({
         {locationsWithCoordinates.length > 0 && (
           <> · <span style={{ color: '#888' }}><strong>{locationsWithCoordinates.length}</strong> location{locationsWithCoordinates.length !== 1 ? 's' : ''}</span></>
         )}
-        {data?.images?.length > imagesWithLocation.length && (
-          <> · <span style={{ color: '#888' }}>{data.images.length - imagesWithLocation.length} without location</span></>
+        {Array.isArray(allImages) && allImages.length > imagesWithLocation.length && (
+          <> · <span style={{ color: '#888' }}>{allImages.length - imagesWithLocation.length} without location</span></>
         )}
       </div>
 

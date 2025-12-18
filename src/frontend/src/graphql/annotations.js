@@ -99,6 +99,36 @@ export const LINK_ENTITY_TO_ANNOTATION = gql`
   }
 `;
 
+export const LINK_VEHICLE_PLATE_TO_ANNOTATION = gql`
+  mutation LinkVehiclePlateToAnnotation(
+    $annotationId: ID!
+    $plate: String!
+    $relationType: String
+    $confidence: Float
+    $notes: String
+  ) {
+    linkVehiclePlateToAnnotation(
+      annotationId: $annotationId
+      plate: $plate
+      relationType: $relationType
+      confidence: $confidence
+      notes: $notes
+    ) {
+      id
+      entityId
+      entity {
+        id
+        displayName
+        entityType
+        tags
+      }
+      relationType
+      confidence
+      notes
+    }
+  }
+`;
+
 export const UNLINK_ENTITY_FROM_ANNOTATION = gql`
   mutation UnlinkEntityFromAnnotation($linkId: ID!) {
     unlinkEntityFromAnnotation(linkId: $linkId) {

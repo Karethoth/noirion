@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import Notification from './Notification';
 import EntitySearch from './EntitySearch';
+import TagPickerModal from './TagPickerModal';
 import './EntityDetail.css';
 import './TimelineView.css';
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
 import {
   GET_ENTITY,
+  GET_ENTITIES,
+  GET_IMAGES_BY_ENTITY,
   CREATE_ENTITY,
   UPDATE_ENTITY,
   ADD_ENTITY_ATTRIBUTE,
@@ -22,11 +26,7 @@ import { GET_EVENTS_BY_ENTITY } from '../graphql/events';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
 
 // Mirror the Map tab basemap configuration
 const MAP_STYLES = {
@@ -123,6 +123,8 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const [tags, setTags] = useState(entity?.tags?.join(', ') || '');
   const [attributes, setAttributes] = useState(entity?.attributes || []);
 
+  const [isTagsModalOpen, setIsTagsModalOpen] = useState(false);
+
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [locationLat, setLocationLat] = useState('');
   const [locationLng, setLocationLng] = useState('');
@@ -159,14 +161,55 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
     }
   });
 
+  const { data: allEntitiesData } = useQuery(GET_ENTITIES, {
+    variables: {
+      entityType: null,
+      limit: 500,
+      offset: 0,
+    },
+  });
+
+  const tagCounts = React.useMemo(() => {
+    const counts = new Map();
+    const ents = allEntitiesData?.entities || [];
+    for (const e of ents) {
+      const uniq = new Set((e?.tags || []).filter(Boolean).map((t) => String(t)));
+      for (const t of uniq) {
+        counts.set(t, (counts.get(t) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [allEntitiesData?.entities]);
+
+  const topTags = React.useMemo(() => {
+    const entries = Array.from(tagCounts.entries());
+    entries.sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    return entries.map(([tag, count]) => ({ tag, count }));
+  }, [tagCounts]);
+
   const { data: presencesData } = useQuery(GET_PRESENCES_BY_ENTITY, {
     variables: {
       entityId: entity?.id,
-      limit: 50,
+      limit: 500,
       offset: 0
     },
     skip: isNewEntity
   });
+
+  const { data: imagesByEntityData } = useQuery(GET_IMAGES_BY_ENTITY, {
+    variables: {
+      entityId: entity?.id,
+      limit: 1000,
+      offset: 0,
+    },
+    skip: isNewEntity,
+    fetchPolicy: 'cache-and-network',
+  });
+
+  const assetPreviewUrl = (img) => {
+    if (!img?.filePath) return null;
+    return `${import.meta.env.VITE_API_URL}${img.filePath}`;
+  };
 
   const { data: eventsByEntityData } = useQuery(GET_EVENTS_BY_ENTITY, {
     variables: {
@@ -578,10 +621,27 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
               <input
                 type="text"
                 value={tags}
-                onChange={(e) => setTags(e.target.value)}
+                readOnly
+                onClick={() => {
+                  if (!canWrite) return;
+                  setIsTagsModalOpen(true);
+                }}
+                onFocus={() => {
+                  if (!canWrite) return;
+                  setIsTagsModalOpen(true);
+                }}
                 placeholder="tag1, tag2, category:value"
                 disabled={!canWrite}
                 className="form-control"
+              />
+              <TagPickerModal
+                isOpen={isTagsModalOpen}
+                title="Edit tags"
+                value={tags}
+                onChange={setTags}
+                tagsWithCounts={topTags}
+                placeholder="tag1, tag2, category:value"
+                onClose={() => setIsTagsModalOpen(false)}
               />
               <small style={{ color: '#888', fontSize: '12px', marginTop: '4px', display: 'block' }}>
                 Use tags to categorize and add metadata. Examples: "color:blue", "status:active", "priority:high"
@@ -733,13 +793,91 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
 
           {!isNewEntity && (
             <div className="form-section">
+              <h3>Assets</h3>
+
+              {imagesByEntityData?.imagesByEntity?.length > 0 ? (
+                <div className="attributes-list">
+                  {imagesByEntityData.imagesByEntity.map((img) => (
+                    <div key={img.id} className="attribute-item">
+                      <div className="attribute-info" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        {img.filePath ? (
+                          <img
+                            src={assetPreviewUrl(img) || ''}
+                            alt={img.displayName || img.filename || `Asset ${img.id}`}
+                            loading="lazy"
+                            style={{
+                              width: 54,
+                              height: 54,
+                              borderRadius: 8,
+                              objectFit: 'cover',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              background: 'rgba(0,0,0,0.25)',
+                              flex: '0 0 auto',
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="attribute-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {img.displayName || img.filename || `Asset ${img.id}`}
+                          </div>
+                          <div className="attribute-meta">
+                            {img.captureTimestamp
+                              ? `Captured: ${new Date(img.captureTimestamp).toLocaleString()}`
+                              : img.uploadedAt
+                                ? `Uploaded: ${new Date(img.uploadedAt).toLocaleString()}`
+                                : 'Time: unknown'}
+                          </div>
+                          <div className="attribute-meta">
+                            {img.latitude != null && img.longitude != null
+                              ? `Coords: ${formatMGRS(Number(img.longitude), Number(img.latitude))}`
+                              : 'Coords: —'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: '#888', fontSize: '14px' }}>
+                  No linked assets yet.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isNewEntity && (
+            <div className="form-section">
               <h3>Presences</h3>
 
               {presencesData?.presencesByEntity?.length > 0 ? (
                 <div className="attributes-list">
                   {presencesData.presencesByEntity.map((p) => (
                     <div key={p.id} className="attribute-item">
-                      <div className="attribute-info">
+                      <div className="attribute-info" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        {p?.sourceAsset?.filePath ? (
+                          <img
+                            src={`${import.meta.env.VITE_API_URL}${p.sourceAsset.filePath}`}
+                            alt={p?.sourceAsset?.id ? `Asset ${p.sourceAsset.id}` : 'Asset'}
+                            loading="lazy"
+                            style={{
+                              width: 54,
+                              height: 54,
+                              borderRadius: 8,
+                              objectFit: 'cover',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              background: 'rgba(0,0,0,0.25)',
+                              flex: '0 0 auto',
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+
+                        <div style={{ minWidth: 0, flex: 1 }}>
                         <div className="attribute-name">
                           {p.observedAt ? new Date(p.observedAt).toLocaleString() : 'Unknown time'}
                         </div>
@@ -751,11 +889,17 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
                         <div className="attribute-meta">
                           {p.sourceType ? `Source: ${p.sourceType}` : 'Source: unknown'}
                         </div>
+                        {p?.sourceAsset?.id && (
+                          <div className="attribute-meta">
+                            Asset: {p.sourceAsset.id}
+                          </div>
+                        )}
                         {p.notes && (
                           <div className="attribute-meta">
                             Notes: {p.notes}
                           </div>
                         )}
+                        </div>
                       </div>
                     </div>
                   ))}

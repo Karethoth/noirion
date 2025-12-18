@@ -3,6 +3,8 @@ import { AssetsService } from '../../services/assets.js';
 import { ImageAnalysisService } from '../../services/image-analysis.js';
 import { AnnotationAiAnalysisRunsService } from '../../services/annotation-ai-analysis-runs.js';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
+import { normalizeLicensePlate } from '../../utils/license-plates.js';
+import { EntityService } from '../../services/entities.js';
 
 const annotationResolvers = {
   Query: {
@@ -86,6 +88,50 @@ const annotationResolvers = {
           observedBy: context.userId
         }
       );
+    },
+
+    linkVehiclePlateToAnnotation: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      const plate = normalizeLicensePlate(args.plate);
+      if (!plate) {
+        throw new Error('Invalid plate');
+      }
+
+      const entityService = new EntityService(context.dbPool);
+
+      // Prefer matching an existing vehicle entity by plate tag.
+      let entity = await entityService.findEntityByTag({
+        entityType: 'vehicle',
+        tagType: 'plate',
+        tagValue: plate,
+      });
+
+      if (!entity?.id) {
+        // Fall back to vehicle:<plate> tag if older data used that.
+        entity = await entityService.findEntityByTag({
+          entityType: 'vehicle',
+          tagType: 'vehicle',
+          tagValue: plate,
+        });
+      }
+
+      if (!entity?.id) {
+        entity = await entityService.createEntity({
+          entityType: 'vehicle',
+          displayName: plate,
+          tags: [`plate:${plate}`, `vehicle:${plate}`],
+          metadata: { source: 'auto_presence_approval' },
+        });
+      }
+
+      const annotationService = new AnnotationService(context.dbPool);
+      return await annotationService.linkEntityToAnnotation(args.annotationId, entity.id, {
+        relationType: args.relationType,
+        confidence: args.confidence,
+        notes: args.notes,
+        observedBy: context.userId,
+      });
     },
 
     unlinkEntityFromAnnotation: async (parent, args, context) => {

@@ -33,6 +33,17 @@ export const GET_PRESENCES_BY_ENTITY = gql`
       longitude
       notes
       sourceType
+      entities {
+        entityId
+        role
+        confidence
+        entity {
+          id
+          entityType
+          displayName
+          tags
+        }
+      }
       sourceAsset {
         id
         filePath
@@ -46,5 +57,11 @@ export const CREATE_PRESENCE = gql`
     createPresence(input: $input) {
       id
     }
+  }
+`;
+
+export const DELETE_PRESENCE = gql`
+  mutation DeletePresence($id: ID!) {
+    deletePresence(id: $id)
   }
 `;

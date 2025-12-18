@@ -52,6 +52,14 @@ const eventResolvers = {
 
   Event: {
     entities: async (parent, args, context) => {
+      if (Array.isArray(parent?.entities)) {
+        return parent.entities;
+      }
+
+      if (context?.loaders?.eventEntitiesByEventId) {
+        return await context.loaders.eventEntitiesByEventId.load(parent.id);
+      }
+
       const eventsService = new EventsService(context.dbPool);
       return await eventsService.getEventEntities(parent.id);
     }
@@ -59,6 +67,14 @@ const eventResolvers = {
 
   EventEntity: {
     entity: async (parent, args, context) => {
+      if (parent?.entity) {
+        return parent.entity;
+      }
+
+      if (context?.loaders?.entitiesById) {
+        return await context.loaders.entitiesById.load(parent.entityId);
+      }
+
       const entityService = new EntityService(context.dbPool);
       return await entityService.getEntityById(parent.entityId);
     }

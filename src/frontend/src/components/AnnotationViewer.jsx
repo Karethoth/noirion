@@ -1,6 +1,8 @@
 ﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useLazyQuery } from '@apollo/client/react';
 import './AnnotationViewer.css';
+import Notification from './Notification';
+import { useAiConfig } from '../utils/aiConfig';
 import {
   SEARCH_ENTITIES_BY_TAG,
   LINK_ENTITY_TO_ANNOTATION,
@@ -11,6 +13,7 @@ import {
 } from '../graphql/annotations';
 
 const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnotationDelete, readOnly = false, setSelectedAnnotationId, onRefetch }) => {
+  const { enabled: aiEnabled, model: aiModel } = useAiConfig();
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
   const imageContainerRef = useRef(null);
@@ -47,6 +50,11 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [showAiHistory, setShowAiHistory] = useState(false);
+
+  const [notification, setNotification] = useState(null);
+  const showNotification = useCallback((message, type = 'info', duration = 3000) => {
+    setNotification({ message, type, duration });
+  }, []);
 
   const [fetchAiHistory, { data: aiHistoryData, loading: aiHistoryLoading, error: aiHistoryError }] = useLazyQuery(
     GET_ANNOTATION_AI_ANALYSIS_RUNS,
@@ -97,10 +105,17 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   const [analyzeAnnotationDraft] = useMutation(ANALYZE_ANNOTATION_DRAFT);
 
   useEffect(() => {
+    if (!aiEnabled) return;
     if (!showAiHistory) return;
     if (!selectedRegion?.id) return;
     fetchAiHistory({ variables: { annotationId: selectedRegion.id, limit: 10 } });
-  }, [showAiHistory, selectedRegion?.id, fetchAiHistory]);
+  }, [aiEnabled, showAiHistory, selectedRegion?.id, fetchAiHistory]);
+
+  useEffect(() => {
+    if (aiEnabled) return;
+    setShowAiHistory(false);
+    setAiResult(null);
+  }, [aiEnabled]);
 
   const formatAiSuggestionIntoDescription = useCallback((currentText, analysis) => {
     const base = (currentText || '').trim();
@@ -138,6 +153,10 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   }, []);
 
   const handleAnalyzeSelectedAnnotation = useCallback(async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
     if (!selectedRegion) return;
     const regionId = selectedRegion?.regions?.[0]?.id || null;
 
@@ -148,6 +167,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
         variables: {
           annotationId: selectedRegion.id,
           regionId,
+          model: aiModel || null,
           persist: false,
         },
       });
@@ -166,11 +186,13 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       }
     } catch (error) {
       console.error('Analyze annotation failed:', error);
-      alert('Failed to analyze annotation');
+      showNotification('Failed to analyze annotation', 'error');
     } finally {
       setAiAnalyzing(false);
     }
   }, [
+    aiEnabled,
+    aiModel,
     selectedRegion,
     analyzeAnnotation,
     readOnly,
@@ -179,9 +201,14 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
     formatAiSuggestionIntoDescription,
     showAiHistory,
     fetchAiHistory,
+    showNotification,
   ]);
 
   const handleAnalyzeDraftAnnotation = useCallback(async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
     if (!pendingRegion) return;
     if (!image?.id) return;
 
@@ -196,7 +223,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
             coordinates: pendingRegion.coordinates,
             style: pendingRegion.style,
           },
-          model: null,
+          model: aiModel || null,
         },
       });
 
@@ -209,11 +236,11 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       }
     } catch (error) {
       console.error('Analyze draft annotation failed:', error);
-      alert('Failed to analyze annotation');
+      showNotification('Failed to analyze annotation', 'error');
     } finally {
       setAiAnalyzing(false);
     }
-  }, [pendingRegion, image?.id, analyzeAnnotationDraft, readOnly, description, formatAiSuggestionIntoDescription]);
+  }, [aiEnabled, aiModel, pendingRegion, image?.id, analyzeAnnotationDraft, readOnly, description, formatAiSuggestionIntoDescription, showNotification]);
 
   const handleUnlinkEntity = async (linkId) => {
     try {
@@ -224,7 +251,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
       });
     } catch (error) {
       console.error('Error unlinking entity:', error);
-      alert('Failed to unlink entity');
+      showNotification('Failed to unlink entity', 'error');
     }
   };
 
@@ -540,6 +567,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
   // Mouse wheel for zoom
   const handleWheel = (e) => {
     e.preventDefault();
+    e.stopPropagation();
     const delta = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = Math.max(0.2, Math.min(5, scale * delta));
 
@@ -560,6 +588,24 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
     setScale(newScale);
   };
+
+  // Ensure wheel preventDefault actually works (React wheel handlers may be passive in some setups).
+  useEffect(() => {
+    const el = imageContainerRef.current;
+    if (!el) return;
+
+    const onWheelNative = (e) => {
+      // Stop page scrolling while zooming.
+      e.preventDefault();
+      e.stopPropagation();
+      handleWheel(e);
+    };
+
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheelNative);
+    };
+  }, [handleWheel]);
 
   // Pan handling
   const handlePanMouseDown = (e) => {
@@ -871,6 +917,14 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
   return (
     <div className="annotation-viewer">
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          duration={notification.duration}
+          onClose={() => setNotification(null)}
+        />
+      )}
       {/* Sidebar annotation list */}
       <div className="annotation-sidebar">
         <div style={{ display: 'flex', alignItems: 'center', marginTop: 0, marginBottom: 8 }}>
@@ -997,7 +1051,6 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
         <div
           ref={imageContainerRef}
           className="viewer-canvas-container"
-          onWheel={handleWheel}
           onMouseDown={handlePanMouseDown}
           onMouseMove={handlePanMouseMove}
           onMouseUp={handlePanMouseUp}
@@ -1005,7 +1058,8 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
           style={{
             cursor: isPanning ? 'grabbing' : (currentTool === 'select' ? 'default' : 'crosshair'),
             overflow: 'hidden',
-            position: 'relative'
+            position: 'relative',
+            overscrollBehavior: 'contain'
           }}
         >
           <div
@@ -1059,19 +1113,21 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
                   />
                 </label>
               </div>
-              <button
-                type="button"
-                onClick={handleAnalyzeDraftAnnotation}
-                disabled={aiAnalyzing}
-                style={{ marginRight: 8 }}
-                title="Analyze the drawn region using LM Studio (does not save the annotation)"
-              >
-                {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
-              </button>
+              {aiEnabled && (
+                <button
+                  type="button"
+                  onClick={handleAnalyzeDraftAnnotation}
+                  disabled={aiAnalyzing}
+                  style={{ marginRight: 8 }}
+                  title="Analyze the drawn region using LM Studio (does not save the annotation)"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+              )}
               <button type="submit">Save Annotation</button>
               <button type="button" style={{ marginLeft: 8 }} onClick={() => { setPendingRegion(null); setDescription(''); }}>Cancel</button>
 
-              {aiResult && (
+              {aiEnabled && aiResult && (
                 <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
                   {getCropPreviewSrc(aiResult) && (
                     <div style={{ marginBottom: 8 }}>
@@ -1233,21 +1289,23 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               <button onClick={handleEditAnnotationSave}>
                 Save
               </button>
-              <button
-                style={{ marginLeft: 8 }}
-                onClick={handleAnalyzeSelectedAnnotation}
-                disabled={aiAnalyzing}
-                title="Analyze selected annotation region using LM Studio"
-              >
-                {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
-              </button>
+              {aiEnabled && (
+                <button
+                  style={{ marginLeft: 8 }}
+                  onClick={handleAnalyzeSelectedAnnotation}
+                  disabled={aiAnalyzing}
+                  title="Analyze selected annotation region using LM Studio"
+                >
+                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                </button>
+              )}
               <button style={{ marginLeft: 8 }} onClick={() => {
                 setEditingDescription(false);
               }}>
                 Cancel
               </button>
             </div>
-            {aiResult && (
+            {aiEnabled && aiResult && (
               <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
                 {getCropPreviewSrc(aiResult) && (
                   <div style={{ marginBottom: 8 }}>
@@ -1366,41 +1424,45 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
 
             {!readOnly && (
               <div className="annotation-details-actions">
-                <button
-                  onClick={handleAnalyzeSelectedAnnotation}
-                  disabled={aiAnalyzing}
-                  title="Analyze selected annotation region using LM Studio"
-                  style={{
-                    backgroundColor: '#2a5a8a',
-                    color: 'white',
-                    border: 'none',
-                    padding: '6px 12px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    marginRight: 8
-                  }}
-                >
-                  {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
-                </button>
-                <button
-                  onClick={() => setShowAiHistory((v) => !v)}
-                  style={{
-                    backgroundColor: '#444',
-                    color: 'white',
-                    border: 'none',
-                    padding: '6px 12px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    marginRight: 8
-                  }}
-                  title="Show recent AI analysis runs for this annotation"
-                >
-                  {showAiHistory ? 'Hide history' : 'History'}
-                </button>
+                {aiEnabled && (
+                  <button
+                    onClick={handleAnalyzeSelectedAnnotation}
+                    disabled={aiAnalyzing}
+                    title="Analyze selected annotation region using LM Studio"
+                    style={{
+                      backgroundColor: '#2a5a8a',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      marginRight: 8
+                    }}
+                  >
+                    {aiAnalyzing ? 'Analyzing…' : 'Analyze (LM Studio)'}
+                  </button>
+                )}
+                {aiEnabled && (
+                  <button
+                    onClick={() => setShowAiHistory((v) => !v)}
+                    style={{
+                      backgroundColor: '#444',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      marginRight: 8
+                    }}
+                    title="Show recent AI analysis runs for this annotation"
+                  >
+                    {showAiHistory ? 'Hide history' : 'History'}
+                  </button>
+                )}
                 <button
                   onClick={() => onAnnotationDelete && onAnnotationDelete(selectedRegion.id)}
                   style={{
@@ -1421,7 +1483,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               </div>
             )}
 
-            {readOnly && (
+            {readOnly && aiEnabled && (
               <div className="annotation-details-actions">
                 <button
                   onClick={handleAnalyzeSelectedAnnotation}
@@ -1440,7 +1502,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               </div>
             )}
 
-            {aiResult && (
+            {aiEnabled && aiResult && (
               <div style={{ marginTop: 10, color: '#bbb', fontSize: 12 }}>
                 {getCropPreviewSrc(aiResult) && (
                   <div style={{ marginBottom: 8 }}>
@@ -1469,7 +1531,7 @@ const AnnotationViewer = ({ image, annotations = [], onAnnotationCreate, onAnnot
               </div>
             )}
 
-            {showAiHistory && (
+            {aiEnabled && showAiHistory && (
               <div style={{ marginTop: 12, borderTop: '1px solid #3a3a3a', paddingTop: 10 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#ddd', marginBottom: 8 }}>Recent AI analyses</div>
                 {aiHistoryLoading && <div style={{ color: '#999', fontSize: 12 }}>Loading…</div>}

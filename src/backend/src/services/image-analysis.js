@@ -6,6 +6,39 @@ import { AssetsService } from './assets.js';
 import { AnnotationService } from './annotations.js';
 import { AnnotationAiAnalysisRunsService } from './annotation-ai-analysis-runs.js';
 import { getConfig } from '../utils/config.js';
+import { ProjectSettingsService } from './project-settings.js';
+
+const MODEL_CACHE = new Map();
+const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const TINY_PNG_1X1_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axXyGQAAAAASUVORK5CYII=';
+
+function isLikelyVisionModelId(id) {
+  const s = String(id || '').toLowerCase();
+  if (!s) return false;
+
+  // Prefer explicit markers.
+  if (s.includes('vision')) return true;
+  if (s.includes('multimodal')) return true;
+
+  // Common open-source vision model families / suffixes.
+  const tokens = [
+    'llava',
+    'qwen2-vl',
+    'qwen-vl',
+    'minicpm-v',
+    'phi-3.5-vision',
+    'phi-4-vision',
+    'pixtral',
+    'idefics',
+    'instructvl',
+    '-vl',
+    '_vl',
+  ];
+
+  return tokens.some((t) => s.includes(t));
+}
 
 function safeJsonParse(text) {
   try {
@@ -40,15 +73,44 @@ function extractFirstJsonObject(text) {
 
 function normalizeLicensePlates(value) {
   if (!value) return [];
+
+  const normalizeOne = (plate) => {
+    if (typeof plate !== 'string') return null;
+    let s = plate.trim();
+    if (!s) return null;
+
+    // Normalize: uppercase, strip whitespace, keep only letters/digits/hyphen.
+    s = s.toUpperCase().replace(/\s+/g, '');
+    s = s.replace(/[^A-Z0-9-]/g, '');
+
+    // Heuristic: models often include the EU/country code from the blue strip.
+    // Example: FINABC-123 -> ABC-123
+    // Only strip when the remaining looks like a plausible plate.
+    const maybeStripPrefix = (prefix) => {
+      if (!s.startsWith(prefix)) return s;
+      const rest = s.slice(prefix.length);
+      if (!rest) return s;
+      const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
+      return looksLikePlate ? rest : s;
+    };
+
+    // Common EU strip / country codes seen on plates.
+    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
+      s = maybeStripPrefix(prefix);
+    }
+
+    return s || null;
+  };
+
   if (Array.isArray(value)) {
     return value
-      .map((x) => (typeof x === 'string' ? x.trim() : null))
+      .map(normalizeOne)
       .filter(Boolean);
   }
   if (typeof value === 'string') {
     return value
       .split(/[,;\n]/)
-      .map((x) => x.trim())
+      .map(normalizeOne)
       .filter(Boolean);
   }
   return [];
@@ -108,18 +170,154 @@ export class ImageAnalysisService {
     this.baseUrl = baseUrl || null;
     this.defaultModel = defaultModel || null;
     this.timeoutMs = timeoutMs || null;
+    this.aiEnabled = true;
   }
 
   async #ensureConfig() {
-    if (this.baseUrl && this.timeoutMs && (this.defaultModel || this.defaultModel === null)) return;
     const cfg = await getConfig();
-    this.baseUrl = (this.baseUrl || cfg.lmStudio.baseUrl).replace(/\/$/, '');
-    this.defaultModel = this.defaultModel || cfg.lmStudio.model || null;
+
+    let project = null;
+    try {
+      const projectSvc = new ProjectSettingsService(this.dbPool);
+      project = await projectSvc.getProjectSettings({ recomputeIfAutoUpdate: false });
+    } catch {
+      project = null;
+    }
+
+    this.aiEnabled = project?.aiEnabled !== false;
+
+    const baseUrlFromProject = project?.lmStudioBaseUrl ? String(project.lmStudioBaseUrl) : null;
+    const modelFromProject = project?.lmStudioModel ? String(project.lmStudioModel) : null;
+
+    this.baseUrl = (this.baseUrl || baseUrlFromProject || cfg.lmStudio.baseUrl).replace(/\/$/, '');
+    this.defaultModel = this.defaultModel || modelFromProject || cfg.lmStudio.model || null;
     this.timeoutMs = Number(this.timeoutMs || cfg.lmStudio.timeoutMs || 60000);
   }
 
+  async listLmStudioModels({ visionOnly = true } = {}) {
+    await this.#ensureConfig();
+    // Allow listing models even if AI features are disabled,
+    // so Settings can be prepared ahead of enabling.
+
+    const cacheKey = `${this.baseUrl}::visionOnly=${visionOnly}`;
+    const cached = MODEL_CACHE.get(cacheKey);
+    if (cached && Date.now() - cached.at < MODEL_CACHE_TTL_MS) return cached.value;
+
+    const models = await this.#fetchLmStudioModels();
+    const enriched = (models || [])
+      .map((m) => {
+        const id = String(m?.id || '').trim();
+        if (!id) return null;
+        const caps = m?.capabilities;
+        const isVision =
+          (caps && typeof caps === 'object' && caps.vision === true) ||
+          isLikelyVisionModelId(id);
+        return { id, isVision };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+    const result = visionOnly ? enriched.filter((m) => m.isVision) : enriched;
+
+    MODEL_CACHE.set(cacheKey, { at: Date.now(), value: result });
+    return result;
+  }
+
+  async testLmStudioVisionModel({ model }) {
+    await this.#ensureConfig();
+
+    const selectedModel = String(model || this.defaultModel || '').trim();
+    if (!selectedModel) {
+      return { ok: false, isVision: false, message: 'No model selected' };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    const imageUrl = `data:image/png;base64,${TINY_PNG_1X1_BASE64}`;
+    const body = {
+      model: selectedModel,
+      temperature: 0,
+      max_tokens: 16,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a vision capability test. If you can see the image, reply with OK. If not, say NO_IMAGE.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Reply with OK if you can process the attached image.' },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+    };
+
+    try {
+      const resp = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      const text = await resp.text().catch(() => '');
+      if (!resp.ok) {
+        const msg = text || resp.statusText || 'Request failed';
+        const lowered = String(msg).toLowerCase();
+        const looksLikeNoVision =
+          lowered.includes('image') &&
+          (lowered.includes('not supported') || lowered.includes('unsupported') || lowered.includes('cannot') || lowered.includes("can't"));
+        return {
+          ok: false,
+          isVision: looksLikeNoVision ? false : false,
+          message: looksLikeNoVision ? msg : `Request failed (${resp.status}): ${msg}`,
+        };
+      }
+
+      const parsed = safeJsonParse(text);
+      const content = parsed.ok ? parsed.value?.choices?.[0]?.message?.content : null;
+      const contentText = typeof content === 'string' ? content : String(text || '').trim();
+      const c = contentText.toLowerCase();
+
+      if (c.includes('no_image') || (c.includes("can't") && c.includes('image')) || (c.includes('cannot') && c.includes('image'))) {
+        return { ok: true, isVision: false, message: contentText || 'Model indicates no image support' };
+      }
+      return { ok: true, isVision: true, message: contentText || 'Vision request succeeded' };
+    } catch (err) {
+      return { ok: false, isVision: false, message: err?.message || String(err) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async #fetchLmStudioModels() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.max(1000, this.timeoutMs || 60000));
+    try {
+      const resp = await fetch(`${this.baseUrl}/v1/models`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+      const text = await resp.text();
+      if (!resp.ok) {
+        throw new Error(`LM Studio models request failed (${resp.status}): ${text || resp.statusText}`);
+      }
+      const parsed = safeJsonParse(text);
+      const list = parsed.ok ? parsed.value : null;
+      const data = Array.isArray(list?.data) ? list.data : [];
+      return data;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+
   async analyzeImageByAssetId(assetId, { model = null, persist = true, userId = null } = {}) {
     await this.#ensureConfig();
+    if (!this.aiEnabled) throw new Error('AI features are disabled in Settings');
     const assetsService = new AssetsService(this.dbPool);
     const asset = await assetsService.getAssetById(assetId);
     if (!asset) throw new Error('Image not found');
@@ -173,6 +371,7 @@ export class ImageAnalysisService {
     { regionId = null, model = null, persist = true, userId = null } = {}
   ) {
     await this.#ensureConfig();
+    if (!this.aiEnabled) throw new Error('AI features are disabled in Settings');
     const annotationService = new AnnotationService(this.dbPool);
     const assetsService = new AssetsService(this.dbPool);
 
@@ -291,6 +490,7 @@ export class ImageAnalysisService {
     { shapeType = 'BOX', coordinates = null, model = null, userId = null } = {}
   ) {
     await this.#ensureConfig();
+    if (!this.aiEnabled) throw new Error('AI features are disabled in Settings');
     const assetsService = new AssetsService(this.dbPool);
 
     const asset = await assetsService.getAssetById(assetId);
@@ -454,10 +654,12 @@ export class ImageAnalysisService {
       'You are a vision assistant for investigative image triage. ' +
       'Return ONLY valid JSON with keys: caption (string), licensePlates (string[]). ' +
       'caption must be a short, factual description (<= 20 words). ' +
-      'licensePlates should include only clearly visible plate numbers; if none, return an empty array.';
+      'licensePlates should include only clearly visible plate numbers; if none, return an empty array. ' +
+      'IMPORTANT: Ignore any country code / EU strip text (e.g., FIN, SF, SWE, EU) printed in the blue band; do NOT include it in the plate number.';
 
     const userText =
       'Analyze the image. Extract any clearly readable vehicle license plate numbers. ' +
+      'If you see a country code on the blue strip (e.g., FIN), ignore it and return only the actual plate identifier (e.g., AVC-123). ' +
       'Also produce a short caption of what the image contains.';
 
     const body = {
@@ -543,13 +745,14 @@ export class ImageAnalysisService {
       'Return ONLY valid JSON with keys: caption (string), tags (string[]), licensePlates (string[]). ' +
       'caption must describe what is inside the selected region (<= 20 words). ' +
       'tags must be short and machine-friendly (lowercase, use underscores or hyphens), without leading #. ' +
-      'licensePlates should include only clearly visible plate numbers; if none, return an empty array.';
+      'licensePlates should include only clearly visible plate numbers; if none, return an empty array. ' +
+      'IMPORTANT: Ignore any country code / EU strip text (e.g., FIN, SF, SWE, EU) printed in the blue band; do NOT include it in the plate number.';
 
     const userText =
       'Analyze this cropped region of an image. ' +
       '1) Provide a short caption of what is visible in the region. ' +
       '2) Provide a small list of suggested tags for the region content. ' +
-      '3) Extract any clearly readable vehicle license plate numbers.';
+      '3) Extract any clearly readable vehicle license plate numbers (ignore country code text on the blue strip, e.g., FIN; return only the plate identifier like ABC-123).';
 
     const body = {
       model,

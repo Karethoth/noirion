@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useMutation } from '@apollo/client/react';
+import { useQuery, useMutation, useApolloClient } from '@apollo/client/react';
 import {
   GET_IMAGE,
   GET_IMAGES,
@@ -9,15 +9,19 @@ import {
   SET_IMAGE_AUTO_PRESENCE_IGNORES,
 } from '../graphql/images';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
+import { useAiConfig } from '../utils/aiConfig';
 import AssetLocationPickerModal from './AssetLocationPickerModal';
 import AnnotationViewer from './AnnotationViewer';
+import Notification from './Notification';
 import {
   GET_ANNOTATIONS,
   CREATE_ANNOTATION as ADD_ANNOTATION,
   DELETE_ANNOTATION,
   ADD_ANNOTATION_REGION as ADD_REGION,
+  LINK_VEHICLE_PLATE_TO_ANNOTATION,
 } from '../graphql/annotations';
 import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
+import { GET_PRESENCES } from '../graphql/presences';
 
 const toDatetimeLocalValue = (isoString) => {
   if (!isoString) return '';
@@ -41,6 +45,8 @@ const fromDatetimeLocalValue = (value) => {
 };
 
 const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
+  const { enabled: aiEnabled, model: aiModel } = useAiConfig();
+  const apolloClient = useApolloClient();
   const rootRef = useRef(null);
   const { loading, error, data, refetch } = useQuery(GET_IMAGE, {
     variables: { id: assetId },
@@ -49,6 +55,15 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   });
 
   const image = data?.image;
+
+  const secondaryButtonStyle = {
+    padding: '8px 12px',
+    borderRadius: 6,
+    border: '1px solid #444',
+    background: '#111',
+    color: '#eee',
+    cursor: 'pointer',
+  };
 
   useEffect(() => {
     // Ensure we always start at the top for a new asset.
@@ -69,6 +84,15 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
 
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+
+  const [notification, setNotification] = useState(null);
+  const showNotification = (message, type = 'info', duration = 3000) => {
+    setNotification({ message, type, duration });
+  };
+
+  const [presencePrompt, setPresencePrompt] = useState(null); // { annotationId, plates: string[] }
+  const [presencePromptSelected, setPresencePromptSelected] = useState([]);
+  const [presencePromptWorking, setPresencePromptWorking] = useState(false);
 
   const [updateImage] = useMutation(UPDATE_IMAGE, {
     refetchQueries: [{ query: GET_IMAGES }],
@@ -96,6 +120,90 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   const [addRegion] = useMutation(ADD_REGION);
   const [deleteAnnotation] = useMutation(DELETE_ANNOTATION);
   const [updateAnnotation] = useMutation(UPDATE_ANNOTATION);
+  const [linkVehiclePlateToAnnotation] = useMutation(LINK_VEHICLE_PLATE_TO_ANNOTATION);
+
+  const normalizePlate = (p) => {
+    if (typeof p !== 'string') return null;
+    let cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    // Models/users sometimes include the blue-strip country code (e.g. FINXXX-YYY).
+    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
+      if (cleaned.startsWith(prefix)) {
+        const rest = cleaned.slice(prefix.length);
+        const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
+        if (looksLikePlate) cleaned = rest;
+      }
+    }
+    return cleaned || null;
+  };
+
+  const maybePromptPresenceForLicensePlates = async (annotationId, tags) => {
+    const plates = Array.from(
+      new Set(
+        (tags || [])
+          .filter((t) => typeof t === 'string' && t.toLowerCase().startsWith('license_plate:'))
+          .map((t) => t.split(':').slice(1).join(':'))
+          .map(normalizePlate)
+          .filter(Boolean)
+      )
+    );
+
+    if (!annotationId || plates.length === 0) return;
+
+    const hasCoords = Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude));
+    const hasTime = !!(image?.captureTimestamp || image?.uploadedAt);
+    if (!hasCoords || !hasTime) {
+      // Auto-presence requires time + coords.
+      showNotification('License plate detected, but presence generation requires timestamp + coordinates on the image', 'info');
+      return;
+    }
+
+    // Open in-app prompt (no browser confirm).
+    setPresencePrompt({ annotationId, plates });
+    setPresencePromptSelected(plates);
+  };
+
+  const closePresencePrompt = () => {
+    setPresencePrompt(null);
+    setPresencePromptSelected([]);
+    setPresencePromptWorking(false);
+  };
+
+  const handlePresencePromptApprove = async () => {
+    if (readOnly) return;
+    if (!presencePrompt?.annotationId || presencePromptSelected.length === 0) {
+      closePresencePrompt();
+      return;
+    }
+
+    setPresencePromptWorking(true);
+    try {
+      for (const plate of presencePromptSelected) {
+        // eslint-disable-next-line no-await-in-loop
+        await linkVehiclePlateToAnnotation({
+          variables: {
+            annotationId: presencePrompt.annotationId,
+            plate,
+            relationType: 'observed',
+            confidence: 0.7,
+            notes: `Auto: license plate ${plate}`,
+          },
+        });
+      }
+
+      try {
+        await apolloClient.refetchQueries({ include: [GET_PRESENCES] });
+      } catch {
+        // ignore
+      }
+
+      showNotification('Presence generated from license plate(s)', 'success');
+      closePresencePrompt();
+    } catch (e) {
+      console.error(e);
+      showNotification(`Failed to generate presence: ${e.message}`, 'error');
+      setPresencePromptWorking(false);
+    }
+  };
 
   useEffect(() => {
     if (!image) return;
@@ -128,6 +236,38 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   const linkedEntities = useMemo(() => {
     const anns = annotationsData?.annotations || [];
     const map = new Map();
+
+    const pickTagValue = (tags, prefixes) => {
+      if (!Array.isArray(tags)) return null;
+      for (const t of tags) {
+        const s = typeof t === 'string' ? t : '';
+        const lower = s.toLowerCase();
+        const prefix = prefixes.find((p) => lower.startsWith(p));
+        if (prefix) {
+          const v = s.slice(prefix.length).trim();
+          if (v) return v;
+        }
+      }
+      return null;
+    };
+
+    const deriveEntityLabel = (entityId, ent) => {
+      const dn = String(ent?.displayName || '').trim();
+      if (dn) return dn;
+
+      const tags = ent?.tags;
+      const plate = pickTagValue(tags, ['license_plate:', 'plate:', 'vehicle:']);
+      if (plate) return plate;
+
+      const name = pickTagValue(tags, ['name:', 'callsign:', 'title:']);
+      if (name) return name;
+
+      const t = String(ent?.entityType || '').trim();
+      if (t) return `${t} (unnamed)`;
+
+      return 'Entity (unnamed)';
+    };
+
     for (const ann of anns) {
       for (const link of ann?.entityLinks || []) {
         const ent = link?.entity;
@@ -135,7 +275,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
         if (!map.has(link.entityId)) {
           map.set(link.entityId, {
             id: link.entityId,
-            displayName: ent?.displayName || link.entityId,
+            displayName: deriveEntityLabel(link.entityId, ent),
             entityType: ent?.entityType || null,
           });
         }
@@ -168,7 +308,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
       await refetch();
     } catch (e) {
       console.error(e);
-      alert('Failed to update auto-presence ignore list.');
+      showNotification('Failed to update auto-presence ignore list', 'error');
     }
   };
 
@@ -183,7 +323,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
       const alt = altitude === '' ? null : Number(altitude);
 
       if ((lat === null) !== (lng === null)) {
-        alert('Both latitude and longitude must be provided together.');
+        showNotification('Both latitude and longitude must be provided together', 'error');
         return;
       }
 
@@ -201,10 +341,10 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
       });
 
       await refetch();
-      alert('Saved.');
+      showNotification('Saved', 'success');
     } catch (err) {
       console.error('Update image error:', err);
-      alert(`Save failed: ${err.message}`);
+      showNotification(`Save failed: ${err.message}`, 'error');
     } finally {
       setSaving(false);
     }
@@ -220,21 +360,25 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
       onBack?.();
     } catch (err) {
       console.error('Delete image error:', err);
-      alert(`Delete failed: ${err.message}`);
+      showNotification(`Delete failed: ${err.message}`, 'error');
     }
   };
 
   const handleAnalyze = async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
     if (readOnly) return;
     if (!assetId) return;
 
     setAnalyzing(true);
     try {
-      await analyzeImage({ variables: { id: assetId, persist: true } });
+      await analyzeImage({ variables: { id: assetId, model: aiModel || null, persist: true } });
       await refetch();
     } catch (err) {
       console.error('Analyze image error:', err);
-      alert(`Analyze failed: ${err.message}`);
+      showNotification(`Analyze failed: ${err.message}`, 'error');
     } finally {
       setAnalyzing(false);
     }
@@ -243,7 +387,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   if (!assetId) {
     return (
       <div style={{ padding: 16 }}>
-        <button onClick={onBack}>Back</button>
+        <button onClick={onBack} style={secondaryButtonStyle}>← Back</button>
         <div style={{ marginTop: 12 }}>No asset selected.</div>
       </div>
     );
@@ -252,7 +396,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   if (loading) {
     return (
       <div style={{ padding: 16 }}>
-        <button onClick={onBack}>Back</button>
+        <button onClick={onBack} style={secondaryButtonStyle}>← Back</button>
         <div style={{ marginTop: 12 }}>Loading…</div>
       </div>
     );
@@ -261,7 +405,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   if (error) {
     return (
       <div style={{ padding: 16 }}>
-        <button onClick={onBack}>Back</button>
+        <button onClick={onBack} style={secondaryButtonStyle}>← Back</button>
         <div style={{ marginTop: 12, color: '#b00020' }}>Error: {error.message}</div>
       </div>
     );
@@ -270,7 +414,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   if (!image) {
     return (
       <div style={{ padding: 16 }}>
-        <button onClick={onBack}>Back</button>
+        <button onClick={onBack} style={secondaryButtonStyle}>← Back</button>
         <div style={{ marginTop: 12 }}>Image not found.</div>
       </div>
     );
@@ -278,6 +422,63 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
 
   return (
     <div ref={rootRef} className="asset-editor-root" style={{ padding: 16, color: '#e0e0e0', boxSizing: 'border-box' }}>
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          duration={notification.duration}
+          onClose={() => setNotification(null)}
+        />
+      )}
+
+      {presencePrompt && (
+        <div className="timeline-modal-overlay" onClick={closePresencePrompt}>
+          <div className="timeline-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 95vw)' }}>
+            <div className="timeline-modal-header">
+              <div className="timeline-modal-title">Generate presence from license plate</div>
+              <button className="timeline-modal-close" onClick={closePresencePrompt} aria-label="Close">×</button>
+            </div>
+            <div className="timeline-modal-body">
+              <div className="timeline-muted" style={{ marginBottom: 10 }}>
+                Select which plates to link as vehicle entities. This uses the image’s timestamp + coordinates.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                {(presencePrompt.plates || []).map((p) => (
+                  <label key={p} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={presencePromptSelected.includes(p)}
+                      disabled={presencePromptWorking}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setPresencePromptSelected((prev) => {
+                          const set = new Set(prev);
+                          if (checked) set.add(p);
+                          else set.delete(p);
+                          return Array.from(set);
+                        });
+                      }}
+                    />
+                    <span style={{ fontFamily: 'monospace' }}>{p}</span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                <button className="timeline-secondary" disabled={presencePromptWorking} onClick={closePresencePrompt}>
+                  Cancel
+                </button>
+                <button
+                  className="timeline-primary"
+                  disabled={presencePromptWorking || presencePromptSelected.length === 0 || readOnly}
+                  onClick={handlePresencePromptApprove}
+                >
+                  {presencePromptWorking ? 'Linking…' : 'Generate'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <AssetLocationPickerModal
         isOpen={isPickingLocation}
         readOnly={readOnly}
@@ -291,10 +492,10 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
       />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <button onClick={onBack} style={{ padding: '8px 12px' }}>← Back</button>
+        <button onClick={onBack} style={secondaryButtonStyle}>← Back</button>
 
         <div style={{ display: 'flex', gap: 10 }}>
-          {!readOnly && (
+          {!readOnly && aiEnabled && (
             <button
               onClick={handleAnalyze}
               disabled={analyzing}
@@ -347,12 +548,12 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
             <div><strong>Filename:</strong> {image.filename}</div>
             <div><strong>Uploaded:</strong> {image.uploadedAt ? new Date(image.uploadedAt).toLocaleString() : 'Unknown'}</div>
             <div><strong>Type:</strong> {image.mimeType || 'Unknown'}</div>
-            {image.aiAnalysis?.caption && (
+            {aiEnabled && image.aiAnalysis?.caption && (
               <div style={{ marginTop: 10 }}>
                 <strong>AI Caption:</strong> {image.aiAnalysis.caption}
               </div>
             )}
-            {image.aiAnalysis?.licensePlates?.length > 0 && (
+            {aiEnabled && image.aiAnalysis?.licensePlates?.length > 0 && (
               <div style={{ marginTop: 6 }}>
                 <strong>AI Plates:</strong> {image.aiAnalysis.licensePlates.join(', ')}
               </div>
@@ -550,6 +751,12 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
                       },
                     });
                     refetchAnnotations();
+                    try {
+                      await maybePromptPresenceForLicensePlates(input.id, input.tags || []);
+                      refetchAnnotations();
+                    } catch (e) {
+                      console.error(e);
+                    }
                     return { ...result.data.updateAnnotation, id: input.id };
                   }
 
@@ -571,6 +778,12 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
                     },
                   });
                   refetchAnnotations();
+                  try {
+                    await maybePromptPresenceForLicensePlates(annotationId, input.tags || []);
+                    refetchAnnotations();
+                  } catch (e) {
+                    console.error(e);
+                  }
                 }}
                 onAnnotationDelete={async (annotationId) => {
                   if (!annotationId) return;

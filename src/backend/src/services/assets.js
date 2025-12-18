@@ -11,6 +11,71 @@ export class AssetsService {
     this.uploadDir = path.join(process.cwd(), 'uploads');
   }
 
+  async getAssetsByEntityId(entityId, { limit = 200, offset = 0 } = {}) {
+    const client = await this.dbPool.connect();
+    try {
+      const lim = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(2000, Number(limit))) : 200;
+      const off = Number.isFinite(Number(offset)) ? Math.max(0, Number(offset)) : 0;
+
+      const result = await client.query(
+        `
+          WITH connected_entities AS (
+            SELECT $1::uuid AS id
+            UNION
+            SELECT el.from_entity AS id
+            FROM entity_links el
+            WHERE el.to_entity = $1::uuid
+            UNION
+            SELECT el.to_entity AS id
+            FROM entity_links el
+            WHERE el.from_entity = $1::uuid
+          )
+          SELECT DISTINCT a.*,
+                 e.capture_timestamp, e.camera_make, e.camera_model,
+                 e.orientation, e.width, e.height, e.altitude,
+                 e.iso, e.aperture, e.shutter_speed, e.focal_length, e.focal_length_35mm,
+                 e.flash, e.flash_mode, e.exposure_program, e.exposure_bias,
+                 e.metering_mode, e.white_balance, e.color_space,
+                 e.lens, e.software, e.copyright, e.artist,
+                 e.exif_raw,
+                 m.display_name as manual_display_name,
+                 m.capture_timestamp as manual_capture_timestamp,
+                 m.altitude as manual_altitude,
+                 ST_Y(COALESCE(m.gps, e.gps)) as latitude,
+                 ST_X(COALESCE(m.gps, e.gps)) as longitude
+          FROM assets a
+          LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
+          LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
+          WHERE a.deleted_at IS NULL
+            AND a.content_type LIKE 'image/%'
+            AND (
+              EXISTS (
+                SELECT 1
+                FROM annotations an
+                JOIN annotation_entity_links ael ON ael.annotation_id = an.id
+                WHERE an.asset_id = a.id
+                  AND ael.entity_id IN (SELECT id FROM connected_entities)
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM presences p
+                JOIN presence_entities pe ON pe.presence_id = p.id
+                WHERE p.source_asset = a.id
+                  AND pe.entity_id IN (SELECT id FROM connected_entities)
+              )
+            )
+          ORDER BY a.uploaded_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [entityId, lim, off]
+      );
+
+      return result.rows.map((row) => this.formatAssetResult(row));
+    } finally {
+      client.release();
+    }
+  }
+
   async _syncAutoPresencesForAssetWithClient(client, assetId, userId = null) {
     // Build observation info using manual override first, then EXIF.
     const infoRes = await client.query(
@@ -38,8 +103,8 @@ export class AssetsService {
     const longitude = info.longitude !== null && info.longitude !== undefined ? Number(info.longitude) : null;
     const hasPoint = Number.isFinite(latitude) && Number.isFinite(longitude);
 
-    // Coordinates are required for auto-presence from images.
-    if (!observedAt || Number.isNaN(observedAt.getTime()) || !hasPoint) return;
+    // Time is required for any timeline presence. If we can't determine it, bail.
+    if (!observedAt || Number.isNaN(observedAt.getTime())) return;
 
     const ignoredIdsRaw = info?.metadata?.autoPresenceIgnoreEntityIds;
     const ignored = new Set(
@@ -91,6 +156,10 @@ export class AssetsService {
       );
 
       if (existingPresence.rows.length === 0) {
+        if (!hasPoint) {
+          // No coordinates: don't create any new auto-presence.
+          continue;
+        }
         const presenceInsert = await client.query(
           `
             INSERT INTO presences (
@@ -129,17 +198,31 @@ export class AssetsService {
         );
       } else {
         // Keep any existing notes, but ensure time/geom are up to date.
-        await client.query(
-          `
-            UPDATE presences
-            SET
-              observed_at = $2,
-              geom = ST_SetSRID(ST_MakePoint($3, $4), 4326),
-              metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
-            WHERE id = $1
-          `,
-          [existingPresence.rows[0].id, observedAt, longitude, latitude]
-        );
+        if (hasPoint) {
+          await client.query(
+            `
+              UPDATE presences
+              SET
+                observed_at = $2,
+                geom = ST_SetSRID(ST_MakePoint($3, $4), 4326),
+                metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id, observedAt, longitude, latitude]
+          );
+        } else {
+          await client.query(
+            `
+              UPDATE presences
+              SET
+                observed_at = $2,
+                geom = NULL,
+                metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
+              WHERE id = $1
+            `,
+            [existingPresence.rows[0].id, observedAt]
+          );
+        }
       }
     }
   }

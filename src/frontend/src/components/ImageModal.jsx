@@ -2,17 +2,24 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
 import AnnotationViewer from './AnnotationViewer';
+import Notification from './Notification';
 import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
 import { ANALYZE_IMAGE } from '../graphql/images';
+import { useApolloClient } from '@apollo/client/react';
+import { useAiConfig } from '../utils/aiConfig';
 import {
   GET_ANNOTATIONS,
   CREATE_ANNOTATION as ADD_ANNOTATION,
   DELETE_ANNOTATION,
-  ADD_ANNOTATION_REGION as ADD_REGION
+  ADD_ANNOTATION_REGION as ADD_REGION,
+  LINK_VEHICLE_PLATE_TO_ANNOTATION,
 } from '../graphql/annotations';
+import { GET_PRESENCES } from '../graphql/presences';
 
 
 const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = null }) => {
+  const { enabled: aiEnabled, model: aiModel } = useAiConfig();
+  const apolloClient = useApolloClient();
   const { data, refetch } = useQuery(GET_ANNOTATIONS, {
     variables: { assetId: image?.id },
     skip: !image,
@@ -26,6 +33,16 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeImage] = useMutation(ANALYZE_IMAGE);
+  const [linkVehiclePlateToAnnotation] = useMutation(LINK_VEHICLE_PLATE_TO_ANNOTATION);
+
+  const [notification, setNotification] = useState(null);
+  const showNotification = useCallback((message, type = 'info', duration = 3000) => {
+    setNotification({ message, type, duration });
+  }, []);
+
+  const [presencePrompt, setPresencePrompt] = useState(null); // { annotationId, plates: string[] }
+  const [presencePromptSelected, setPresencePromptSelected] = useState([]);
+  const [presencePromptWorking, setPresencePromptWorking] = useState(false);
 
   // When annotations change, select the first by default if none selected
   useEffect(() => {
@@ -42,23 +59,28 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
   }, [image]);
 
   const handleAnalyze = useCallback(async () => {
+    if (!aiEnabled) {
+      showNotification('AI features are disabled in Settings', 'info');
+      return;
+    }
     if (!image?.id) return;
     setAnalyzing(true);
     try {
       const res = await analyzeImage({
         variables: {
           id: image.id,
+          model: aiModel || null,
           persist: true,
         },
       });
       setAiAnalysis(res?.data?.analyzeImage || null);
     } catch (err) {
       console.error('Analyze image error:', err);
-      alert(`Analyze failed: ${err.message}`);
+      showNotification(`Analyze failed: ${err.message}`, 'error');
     } finally {
       setAnalyzing(false);
     }
-  }, [analyzeImage, image]);
+  }, [aiEnabled, aiModel, analyzeImage, image?.id, showNotification]);
 
   // Delete annotation handler
   const handleAnnotationDelete = useCallback(async (annotationId) => {
@@ -68,6 +90,86 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
     if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null);
     refetch();
   }, [deleteAnnotation, refetch, selectedAnnotationId]);
+
+  const normalizePlate = (p) => {
+    if (typeof p !== 'string') return null;
+    let cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
+      if (cleaned.startsWith(prefix)) {
+        const rest = cleaned.slice(prefix.length);
+        const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
+        if (looksLikePlate) cleaned = rest;
+      }
+    }
+    return cleaned || null;
+  };
+
+  const maybePromptPresenceForLicensePlates = async (annotationId, tags) => {
+    const plates = Array.from(
+      new Set(
+        (tags || [])
+          .filter((t) => typeof t === 'string' && t.toLowerCase().startsWith('license_plate:'))
+          .map((t) => t.split(':').slice(1).join(':'))
+          .map(normalizePlate)
+          .filter(Boolean)
+      )
+    );
+
+    if (!annotationId || plates.length === 0) return;
+
+    const hasCoords = Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude));
+    const hasTime = !!(image?.captureTimestamp || image?.uploadedAt);
+    if (!hasCoords || !hasTime) {
+      showNotification('License plate detected, but presence generation requires timestamp + coordinates on the image', 'info');
+      return;
+    }
+
+    setPresencePrompt({ annotationId, plates });
+    setPresencePromptSelected(plates);
+  };
+
+  const closePresencePrompt = () => {
+    setPresencePrompt(null);
+    setPresencePromptSelected([]);
+    setPresencePromptWorking(false);
+  };
+
+  const handlePresencePromptApprove = async () => {
+    if (readOnly) return;
+    if (!presencePrompt?.annotationId || presencePromptSelected.length === 0) {
+      closePresencePrompt();
+      return;
+    }
+
+    setPresencePromptWorking(true);
+    try {
+      for (const plate of presencePromptSelected) {
+        // eslint-disable-next-line no-await-in-loop
+        await linkVehiclePlateToAnnotation({
+          variables: {
+            annotationId: presencePrompt.annotationId,
+            plate,
+            relationType: 'observed',
+            confidence: 0.7,
+            notes: `Auto: license plate ${plate}`,
+          },
+        });
+      }
+
+      try {
+        await apolloClient.refetchQueries({ include: [GET_PRESENCES] });
+      } catch {
+        // ignore
+      }
+
+      showNotification('Presence generated from license plate(s)', 'success');
+      closePresencePrompt();
+    } catch (e) {
+      console.error(e);
+      showNotification(`Failed to generate presence: ${e.message}`, 'error');
+      setPresencePromptWorking(false);
+    }
+  };
 
   if (!isOpen || !image) return null;
 
@@ -104,6 +206,63 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {notification && (
+          <Notification
+            message={notification.message}
+            type={notification.type}
+            duration={notification.duration}
+            onClose={() => setNotification(null)}
+          />
+        )}
+
+        {presencePrompt && (
+          <div className="timeline-modal-overlay" onClick={closePresencePrompt}>
+            <div className="timeline-modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 95vw)' }}>
+              <div className="timeline-modal-header">
+                <div className="timeline-modal-title">Generate presence from license plate</div>
+                <button className="timeline-modal-close" onClick={closePresencePrompt} aria-label="Close">×</button>
+              </div>
+              <div className="timeline-modal-body">
+                <div className="timeline-muted" style={{ marginBottom: 10 }}>
+                  Select which plates to link as vehicle entities. This uses the image’s timestamp + coordinates.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  {(presencePrompt.plates || []).map((p) => (
+                    <label key={p} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={presencePromptSelected.includes(p)}
+                        disabled={presencePromptWorking}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setPresencePromptSelected((prev) => {
+                            const set = new Set(prev);
+                            if (checked) set.add(p);
+                            else set.delete(p);
+                            return Array.from(set);
+                          });
+                        }}
+                      />
+                      <span style={{ fontFamily: 'monospace' }}>{p}</span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <button className="timeline-secondary" disabled={presencePromptWorking} onClick={closePresencePrompt}>
+                    Cancel
+                  </button>
+                  <button
+                    className="timeline-primary"
+                    disabled={presencePromptWorking || presencePromptSelected.length === 0 || readOnly}
+                    onClick={handlePresencePromptApprove}
+                  >
+                    {presencePromptWorking ? 'Linking…' : 'Generate'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Close button */}
         <button
           onClick={onClose}
@@ -147,6 +306,12 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
                   },
                 });
                 refetch();
+                try {
+                  await maybePromptPresenceForLicensePlates(input.id, input.tags || []);
+                  refetch();
+                } catch (e) {
+                  console.error(e);
+                }
                 // Return the updated annotation with id so entity linking works
                 return { ...result.data.updateAnnotation, id: input.id };
               }
@@ -169,6 +334,12 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
                 },
               });
               refetch();
+              try {
+                await maybePromptPresenceForLicensePlates(annotationId, input.tags || []);
+                refetch();
+              } catch (e) {
+                console.error(e);
+              }
             }}
             onAnnotationDelete={handleAnnotationDelete}
           />
@@ -186,7 +357,7 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
           overflowY: 'auto'
         }}>
           <h3 style={{ margin: '0 0 10px 0', color: '#e0e0e0' }}>{image.filename}</h3>
-          {!readOnly && (
+          {!readOnly && aiEnabled && (
             <div style={{ marginBottom: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button
                 onClick={handleAnalyze}
@@ -235,12 +406,12 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
               {image.cameraMake && image.cameraModel && (
                 <div><strong>Camera:</strong> {image.cameraMake} {image.cameraModel}</div>
               )}
-              {aiAnalysis?.caption && (
+              {aiEnabled && aiAnalysis?.caption && (
                 <div style={{ marginTop: '8px' }}>
                   <strong>AI Caption:</strong> {aiAnalysis.caption}
                 </div>
               )}
-              {aiAnalysis?.licensePlates?.length > 0 && (
+              {aiEnabled && aiAnalysis?.licensePlates?.length > 0 && (
                 <div style={{ marginTop: '6px' }}>
                   <strong>AI Plates:</strong> {aiAnalysis.licensePlates.join(', ')}
                 </div>

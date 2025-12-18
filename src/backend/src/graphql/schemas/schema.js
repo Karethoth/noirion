@@ -9,6 +9,7 @@ export const typeDefs = `#graphql
     images: [Image!]!
     image(id: ID!): Image
     imagesInArea(bounds: BoundsInput!): [Image!]!
+    imagesByEntity(entityId: ID!, limit: Int, offset: Int): [Image!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
 
@@ -29,6 +30,8 @@ export const typeDefs = `#graphql
     eventsByEntity(entityId: ID!, before: String, after: String, limit: Int, offset: Int): [Event!]!
 
     projectSettings: ProjectSettings!
+    lmStudioModels(visionOnly: Boolean = false): [LmStudioModel!]!
+    lmStudioTestVision(modelId: String!): LmStudioVisionTestResult!
 
     annotationAiAnalysisRuns(annotationId: ID, limit: Int = 20): [AnnotationAIAnalysisRun!]!
   }
@@ -82,10 +85,12 @@ export const typeDefs = `#graphql
 
     # Entity-Annotation linking mutations
     linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    linkVehiclePlateToAnnotation(annotationId: ID!, plate: String!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
     unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
 
     # Presence mutations
     createPresence(input: CreatePresenceInput!): Presence!
+    deletePresence(id: ID!): Boolean!
 
     # Entity relationship mutations
     createEntityLink(input: CreateEntityLinkInput!): EntityLink!
@@ -98,20 +103,39 @@ export const typeDefs = `#graphql
 
     updateProjectSettings(input: UpdateProjectSettingsInput!): ProjectSettings!
     recalculateProjectHomeLocation: ProjectSettings!
+
+    # Dev/admin only
+    devResetDatabase(confirm: String!): Boolean!
   }
 
   type ProjectSettings {
     homeLat: Float
     homeLng: Float
     homeAutoUpdate: Boolean!
+      aiEnabled: Boolean!
+      lmStudioBaseUrl: String!
+      lmStudioModel: String
   }
 
   input UpdateProjectSettingsInput {
     homeLat: Float
     homeLng: Float
     homeAutoUpdate: Boolean
+      aiEnabled: Boolean
+      lmStudioBaseUrl: String
+      lmStudioModel: String
   }
 
+  type LmStudioModel {
+    id: String!
+    isVision: Boolean!
+  }
+
+  type LmStudioVisionTestResult {
+    ok: Boolean!
+    isVision: Boolean!
+    message: String
+  }
   type AuthPayload {
     token: String!
     user: User!

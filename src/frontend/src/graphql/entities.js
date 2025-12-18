@@ -53,6 +53,37 @@ export const SEARCH_ENTITIES = gql`
   }
 `;
 
+export const GET_IMAGES_BY_ENTITY = gql`
+  query GetImagesByEntity($entityId: ID!, $limit: Int, $offset: Int) {
+    imagesByEntity(entityId: $entityId, limit: $limit, offset: $offset) {
+      id
+      filename
+      displayName
+      filePath
+      fileSize
+      width
+      height
+      uploadedAt
+      captureTimestamp
+      cameraMake
+      cameraModel
+      latitude
+      longitude
+      aiAnalysis {
+        caption
+        licensePlates
+        model
+        createdAt
+      }
+      annotations {
+        id
+        title
+        tags
+      }
+    }
+  }
+`;
+
 export const CREATE_ENTITY = gql`
   mutation CreateEntity($input: CreateEntityInput!) {
     createEntity(input: $input) {

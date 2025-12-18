@@ -1,9 +1,38 @@
 import { logger } from '../utils/logger.js';
+import { getConfig } from '../utils/config.js';
 
 const KEYS = {
   homeLocation: 'project.homeLocation',
   homeAutoUpdate: 'project.homeAutoUpdate',
+  aiEnabled: 'ai.enabled',
+  lmStudioBaseUrl: 'ai.lmStudio.baseUrl',
+  lmStudioModel: 'ai.lmStudio.model',
 };
+
+function normalizeBoolean(v, defaultValue = true) {
+  if (v === null || v === undefined) return defaultValue;
+  if (typeof v === 'boolean') return v;
+  const s = String(v).trim().toLowerCase();
+  if (['false', '0', 'no', 'off'].includes(s)) return false;
+  if (['true', '1', 'yes', 'on'].includes(s)) return true;
+  return defaultValue;
+}
+
+function normalizeBaseUrl(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  let url;
+  try {
+    url = new URL(s);
+  } catch {
+    throw new Error('lmStudioBaseUrl must be a valid URL');
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('lmStudioBaseUrl must start with http:// or https://');
+  }
+  return s.replace(/\/$/, '');
+}
 
 export class ProjectSettingsService {
   constructor(dbPool) {
@@ -88,6 +117,8 @@ export class ProjectSettingsService {
   }
 
   async getProjectSettings({ recomputeIfAutoUpdate = true } = {}) {
+    const cfg = await getConfig();
+
     const autoRaw = await this.#getValue(KEYS.homeAutoUpdate);
     const autoUpdate = autoRaw === true || autoRaw === 'true' || autoRaw?.enabled === true;
 
@@ -122,16 +153,45 @@ export class ProjectSettingsService {
       }
     }
 
+    const aiEnabledRaw = await this.#getValue(KEYS.aiEnabled);
+    const aiEnabled = normalizeBoolean(aiEnabledRaw, true);
+
+    const lmStudioBaseUrlRaw = await this.#getValue(KEYS.lmStudioBaseUrl);
+    const lmStudioBaseUrl = normalizeBaseUrl(lmStudioBaseUrlRaw) || (cfg?.lmStudio?.baseUrl || 'http://127.0.0.1:1234');
+
+    const lmStudioModelRaw = await this.#getValue(KEYS.lmStudioModel);
+    const lmStudioModel = (typeof lmStudioModelRaw === 'string' ? lmStudioModelRaw : lmStudioModelRaw?.id || lmStudioModelRaw?.model || null);
+
     return {
       homeLat,
       homeLng,
       homeAutoUpdate: !!autoUpdate,
+      aiEnabled: !!aiEnabled,
+      lmStudioBaseUrl: String(lmStudioBaseUrl || '').replace(/\/$/, ''),
+      lmStudioModel: lmStudioModel ? String(lmStudioModel) : null,
     };
   }
 
-  async updateProjectSettings({ homeLat, homeLng, homeAutoUpdate } = {}, updatedBy) {
+  async updateProjectSettings(
+    { homeLat, homeLng, homeAutoUpdate, aiEnabled, lmStudioBaseUrl, lmStudioModel } = {},
+    updatedBy
+  ) {
     if (homeAutoUpdate !== undefined) {
       await this.#setValue(KEYS.homeAutoUpdate, !!homeAutoUpdate, updatedBy);
+    }
+
+    if (aiEnabled !== undefined) {
+      await this.#setValue(KEYS.aiEnabled, !!aiEnabled, updatedBy);
+    }
+
+    if (lmStudioBaseUrl !== undefined) {
+      const normalized = normalizeBaseUrl(lmStudioBaseUrl);
+      await this.#setValue(KEYS.lmStudioBaseUrl, normalized, updatedBy);
+    }
+
+    if (lmStudioModel !== undefined) {
+      const next = lmStudioModel == null ? null : String(lmStudioModel).trim();
+      await this.#setValue(KEYS.lmStudioModel, next || null, updatedBy);
     }
 
     const hasLat = homeLat !== undefined && homeLat !== null;
