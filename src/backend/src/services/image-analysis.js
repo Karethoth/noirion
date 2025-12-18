@@ -11,9 +11,6 @@ import { ProjectSettingsService } from './project-settings.js';
 const MODEL_CACHE = new Map();
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const TINY_PNG_1X1_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axXyGQAAAAASUVORK5CYII=';
-
 function isLikelyVisionModelId(id) {
   const s = String(id || '').toLowerCase();
   if (!s) return false;
@@ -231,10 +228,44 @@ export class ImageAnalysisService {
       return { ok: false, isVision: false, message: 'No model selected' };
     }
 
+    // Use a real uploaded asset for the vision test.
+    // This avoids false positives and ensures the system is actually able to read an image from disk.
+    let testImage;
+    try {
+      const { rows } = await this.dbPool.query(
+        `
+          SELECT storage_path
+          FROM assets
+          WHERE deleted_at IS NULL
+          ORDER BY uploaded_at DESC, created_at DESC
+          LIMIT 1
+        `
+      );
+      const storagePath = rows?.[0]?.storage_path;
+      if (!storagePath) {
+        return {
+          ok: false,
+          isVision: false,
+          message: 'No assets found. Upload at least one image before running a vision test.',
+        };
+      }
+
+      const absolute = this.#resolveUploadPath(storagePath);
+      const buffer = await fs.readFile(absolute);
+      testImage = await this.#prepareImageForVision(buffer);
+    } catch (err) {
+      return {
+        ok: false,
+        isVision: false,
+        message: err?.message || 'Failed to load an uploaded image for vision test',
+      };
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const imageUrl = `data:image/png;base64,${TINY_PNG_1X1_BASE64}`;
+    const imageBase64 = testImage.buffer.toString('base64');
+    const imageUrl = `data:${testImage.mimeType};base64,${imageBase64}`;
     const body = {
       model: selectedModel,
       temperature: 0,
