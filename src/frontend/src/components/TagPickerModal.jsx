@@ -1,16 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './TimelineView.css';
-
-const normalizeToken = (t) => String(t || '').trim();
-
-const addTagTokenToInput = (current, tag) => {
-  const t = normalizeToken(tag);
-  if (!t) return current || '';
-  const cur = (current || '').trim();
-  if (!cur) return t;
-  const hasTrailingSep = /[\s,]$/.test(cur);
-  return hasTrailingSep ? `${cur}${t}` : `${cur}, ${t}`;
-};
+import { normalizeToken, addTagTokenToInput } from '../utils/tagTokens';
 
 const TagPickerModal = ({
   isOpen,

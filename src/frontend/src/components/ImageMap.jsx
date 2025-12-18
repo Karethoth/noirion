@@ -2,13 +2,19 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import { useQuery, useMutation } from '@apollo/client/react';
 import { formatMGRS } from '../utils/coordinates';
+import { toDatetimeLocalValue } from '../utils/datetimeLocal';
+import { parseTagTokens } from '../utils/tagTokens';
+import { MAP_STYLES, loadSavedMapStyle, saveMapStyle } from '../utils/mapStyles';
+import { loadSavedMapView, saveMapView } from '../utils/mapViewStorage';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
+import { buildAssetUrl } from '../utils/assetUrls';
+import MapStyleController from './MapStyleController';
 import ImageModal from './ImageModal';
 import Notification from './Notification';
 import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
-import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
 import { GET_IMAGES, DELETE_IMAGE } from '../graphql/images';
 import { GET_EVENTS, CREATE_EVENT } from '../graphql/events';
 import { GET_PRESENCES, GET_PRESENCES_BY_ENTITY, CREATE_PRESENCE, DELETE_PRESENCE } from '../graphql/presences';
@@ -23,29 +29,10 @@ const DEBUG_GRAPHQL = ['1', 'true', 'yes', 'on'].includes(
 let savedMapView = null;
 
 // Load from localStorage on module load
-try {
-  const stored = localStorage.getItem('mapView');
-  if (stored) {
-    savedMapView = JSON.parse(stored);
-  }
-} catch (e) {
-  console.error('Failed to load saved map view:', e);
-}
+savedMapView = loadSavedMapView('mapView');
 
-// Fix for default markers in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
+initLeafletDefaultMarkerIcons();
 
-
-function toDatetimeLocalValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const mm = pad(date.getMonth() + 1);
-  const dd = pad(date.getDate());
-  const hh = pad(date.getHours());
-  const mi = pad(date.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-}
 
 // Component to restore saved view or fit bounds to markers
 function MapInitializer({ points, hasInitialized }) {
@@ -93,11 +80,7 @@ function ViewPersistence() {
       savedMapView = view;
 
       // Also persist to localStorage
-      try {
-        localStorage.setItem('mapView', JSON.stringify(view));
-      } catch (e) {
-        console.error('Failed to save map view:', e);
-      }
+      saveMapView(view, 'mapView');
     };
 
     map.on('moveend', saveView);
@@ -108,25 +91,6 @@ function ViewPersistence() {
       map.off('zoomend', saveView);
     };
   }, [map]);
-
-  return null;
-}
-
-// Component to apply map style class to container
-function MapStyleController({ style }) {
-  const map = useMap();
-
-  useEffect(() => {
-    const container = map.getContainer();
-
-    // Remove all style classes
-    container.classList.remove('map-style-day', 'map-style-night', 'map-style-satellite');
-
-    // Add the current style class
-    if (style !== 'day') { // 'day' is the default, no need for extra class
-      container.classList.add(`map-style-${style}`);
-    }
-  }, [style, map]);
 
   return null;
 }
@@ -164,25 +128,6 @@ function MapViewTracker({ onViewChange }) {
   return null;
 }
 
-// Map style configurations
-const MAP_STYLES = {
-  day: {
-    name: 'Day',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  },
-  night: {
-    name: 'Night',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-  },
-  satellite: {
-    name: 'Satellite',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri'
-  }
-};
-
 const ImageMap = ({
   userRole,
   timeCursor = null,
@@ -199,11 +144,7 @@ const ImageMap = ({
   const [filterTagsRaw, setFilterTagsRaw] = useState('');
 
   const filterTagTokens = useMemo(() => {
-    return (filterTagsRaw || '')
-      .split(/[\s,]+/g)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => x.toLowerCase());
+    return parseTagTokens(filterTagsRaw);
   }, [filterTagsRaw]);
 
   const imagesQuery = filterEntityId ? GET_IMAGES_BY_ENTITY : GET_IMAGES;
@@ -286,7 +227,7 @@ const ImageMap = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [mapStyle, setMapStyle] = useState(() => {
     // Load saved map style from localStorage, default to 'day'
-    return localStorage.getItem('mapStyle') || 'day';
+    return loadSavedMapStyle('mapStyle');
   });
   const hasInitializedBounds = useRef(false);
   const [mapInstance, setMapInstance] = useState(null);
@@ -297,6 +238,11 @@ const ImageMap = ({
   const latestPresencesRef = useRef([]);
   const latestMapInstanceRef = useRef(null);
   const openPresenceRetryRef = useRef({ timer: null, attempts: 0, lastId: null, didFly: false });
+
+  useEffect(() => {
+    // Persist selected style.
+    saveMapStyle(mapStyle, 'mapStyle');
+  }, [mapStyle]);
 
   // External request to open an image (e.g. immediately after upload).
   useEffect(() => {
@@ -1571,7 +1517,7 @@ const ImageMap = ({
                   setIsModalOpen(true);
                 }}>
                   <img
-                    src={`${import.meta.env.VITE_API_URL}${image.filePath}`}
+                    src={buildAssetUrl(image.filePath)}
                     alt={image.filename}
                     style={{
                       width: '100%',

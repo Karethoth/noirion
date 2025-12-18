@@ -10,6 +10,9 @@ import {
 } from '../graphql/images';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
 import { useAiConfig } from '../utils/aiConfig';
+import { toDatetimeLocalValue, fromDatetimeLocalValue } from '../utils/datetimeLocal';
+import { normalizePlate } from '../utils/licensePlates';
+import { buildAssetUrl } from '../utils/assetUrls';
 import AssetLocationPickerModal from './AssetLocationPickerModal';
 import AnnotationViewer from './AnnotationViewer';
 import Notification from './Notification';
@@ -22,27 +25,6 @@ import {
 } from '../graphql/annotations';
 import { UPDATE_ANNOTATION } from './updateAnnotationMutation';
 import { GET_PRESENCES } from '../graphql/presences';
-
-const toDatetimeLocalValue = (isoString) => {
-  if (!isoString) return '';
-  const d = new Date(isoString);
-  if (Number.isNaN(d.getTime())) return '';
-
-  const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  const mm = pad(d.getMonth() + 1);
-  const dd = pad(d.getDate());
-  const hh = pad(d.getHours());
-  const min = pad(d.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-};
-
-const fromDatetimeLocalValue = (value) => {
-  if (!value) return null;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-};
 
 const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   const { enabled: aiEnabled, model: aiModel } = useAiConfig();
@@ -121,20 +103,6 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   const [deleteAnnotation] = useMutation(DELETE_ANNOTATION);
   const [updateAnnotation] = useMutation(UPDATE_ANNOTATION);
   const [linkVehiclePlateToAnnotation] = useMutation(LINK_VEHICLE_PLATE_TO_ANNOTATION);
-
-  const normalizePlate = (p) => {
-    if (typeof p !== 'string') return null;
-    let cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-    // Models/users sometimes include the blue-strip country code (e.g. FINXXX-YYY).
-    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
-      if (cleaned.startsWith(prefix)) {
-        const rest = cleaned.slice(prefix.length);
-        const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
-        if (looksLikePlate) cleaned = rest;
-      }
-    }
-    return cleaned || null;
-  };
 
   const maybePromptPresenceForLicensePlates = async (annotationId, tags) => {
     const plates = Array.from(
@@ -229,8 +197,7 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   }, [latitude, longitude]);
 
   const imageUrl = useMemo(() => {
-    if (!image?.filePath) return null;
-    return `${import.meta.env.VITE_API_URL}${image.filePath}`;
+    return buildAssetUrl(image?.filePath);
   }, [image?.filePath]);
 
   const linkedEntities = useMemo(() => {

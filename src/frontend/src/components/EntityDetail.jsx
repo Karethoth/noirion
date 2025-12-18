@@ -7,9 +7,12 @@ import './EntityDetail.css';
 import './TimelineView.css';
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
+import MapStyleController from './MapStyleController';
+import { MAP_STYLES, loadSavedMapStyle } from '../utils/mapStyles';
+import { loadSavedMapView } from '../utils/mapViewStorage';
+import { buildAssetUrl } from '../utils/assetUrls';
 import {
   GET_ENTITY,
   GET_ENTITIES,
@@ -24,52 +27,7 @@ import { GET_PRESENCES_BY_ENTITY } from '../graphql/presences';
 import { GET_ENTITY_LINKS, CREATE_ENTITY_LINK, DELETE_ENTITY_LINK } from '../graphql/entityLinks';
 import { GET_EVENTS_BY_ENTITY } from '../graphql/events';
 
-// Fix for default markers in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
-
-// Mirror the Map tab basemap configuration
-const MAP_STYLES = {
-  day: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  },
-  night: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-  },
-  satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri'
-  }
-};
-
-function MapStyleController({ style }) {
-  const map = useMap();
-
-  useEffect(() => {
-    const container = map.getContainer();
-    container.classList.remove('map-style-day', 'map-style-night', 'map-style-satellite');
-    if (style && style !== 'day') {
-      container.classList.add(`map-style-${style}`);
-    }
-  }, [style, map]);
-
-  return null;
-}
-
-function getSavedMapView() {
-  try {
-    const raw = localStorage.getItem('mapView');
-    if (!raw) return null;
-    const view = JSON.parse(raw);
-    if (!view?.center || typeof view?.zoom !== 'number') return null;
-    if (typeof view.center.lat !== 'number' || typeof view.center.lng !== 'number') return null;
-    return view;
-  } catch {
-    return null;
-  }
-}
+initLeafletDefaultMarkerIcons();
 
 const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const isNewEntity = !entity;
@@ -130,13 +88,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const [locationLng, setLocationLng] = useState('');
   const [locationMGRS, setLocationMGRS] = useState('');
 
-  const mapStyle = (() => {
-    try {
-      return localStorage.getItem('mapStyle') || 'day';
-    } catch {
-      return 'day';
-    }
-  })();
+  const mapStyle = loadSavedMapStyle('mapStyle');
 
   // New attribute form
   const [newAttrName, setNewAttrName] = useState('');
@@ -207,8 +159,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   });
 
   const assetPreviewUrl = (img) => {
-    if (!img?.filePath) return null;
-    return `${import.meta.env.VITE_API_URL}${img.filePath}`;
+    return buildAssetUrl(img?.filePath);
   };
 
   const { data: eventsByEntityData } = useQuery(GET_EVENTS_BY_ENTITY, {
@@ -458,7 +409,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
   const LocationPickerModal = ({ isOpen, title, valueLat, valueLng, onPick, onClose }) => {
     if (!isOpen) return null;
 
-    const saved = getSavedMapView();
+    const saved = loadSavedMapView('mapView');
     const fallbackCenter = saved?.center ? [saved.center.lat, saved.center.lng] : [60.1699, 24.9384];
     const fallbackZoom = typeof saved?.zoom === 'number' ? saved.zoom : 4;
 
@@ -859,7 +810,7 @@ const EntityDetail = ({ entity, onClose, onSaved, userRole }) => {
                       <div className="attribute-info" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                         {p?.sourceAsset?.filePath ? (
                           <img
-                            src={`${import.meta.env.VITE_API_URL}${p.sourceAsset.filePath}`}
+                            src={buildAssetUrl(p.sourceAsset.filePath)}
                             alt={p?.sourceAsset?.id ? `Asset ${p.sourceAsset.id}` : 'Asset'}
                             loading="lazy"
                             style={{

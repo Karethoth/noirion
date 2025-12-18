@@ -2,14 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client/react';
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
 import { formatMGRS } from '../utils/coordinates';
 import { GET_PROJECT_SETTINGS } from '../graphql/settings';
+import MapStyleController from './MapStyleController';
+import { MAP_STYLES, loadSavedMapStyle } from '../utils/mapStyles';
 
-// Fix for default markers in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
+initLeafletDefaultMarkerIcons();
 
 function ClickToPick({ onPick }) {
   useMapEvents({
@@ -17,20 +16,6 @@ function ClickToPick({ onPick }) {
       onPick(e.latlng.lat, e.latlng.lng);
     },
   });
-  return null;
-}
-
-function MapStyleController({ style }) {
-  const map = useMap();
-
-  useEffect(() => {
-    const container = map.getContainer();
-    container.classList.remove('map-style-day', 'map-style-night', 'map-style-satellite');
-    if (style !== 'day') {
-      container.classList.add(`map-style-${style}`);
-    }
-  }, [style, map]);
-
   return null;
 }
 
@@ -48,29 +33,7 @@ function MapRecenter({ center, zoom }) {
   return null;
 }
 
-const MAP_STYLES = {
-  day: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  },
-  night: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-  },
-  satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri'
-  }
-};
-
-const getSavedMapStyle = () => {
-  try {
-    const style = localStorage.getItem('mapStyle') || 'day';
-    return MAP_STYLES[style] ? style : 'day';
-  } catch {
-    return 'day';
-  }
-};
+const getSavedMapStyle = () => loadSavedMapStyle('mapStyle');
 
 const getStoredCenter = (key) => {
   try {

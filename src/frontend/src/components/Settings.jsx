@@ -12,21 +12,7 @@ import {
 } from '../graphql/settings';
 import { DEV_RESET_DATABASE } from '../graphql/admin';
 import { setAiConfig } from '../utils/aiConfig';
-
-const STORAGE_KEYS = {
-  mapStyle: 'mapStyle',
-  mapView: 'mapView',
-};
-
-function loadMapStyle() {
-  try {
-    const s = localStorage.getItem(STORAGE_KEYS.mapStyle) || 'day';
-    if (['day', 'night', 'satellite'].includes(s)) return s;
-  } catch {
-    // ignore
-  }
-  return 'day';
-}
+import HomeLocationPickerModal from './HomeLocationPickerModal';
 
 const Settings = () => {
   const { data, loading, error, refetch } = useQuery(GET_PROJECT_SETTINGS, {
@@ -40,7 +26,7 @@ const Settings = () => {
   const [autoUpdateHome, setAutoUpdateHome] = useState(false);
   const [homeLat, setHomeLat] = useState('');
   const [homeLng, setHomeLng] = useState('');
-  const [mapStyle, setMapStyle] = useState(() => loadMapStyle());
+  const [isHomePickerOpen, setIsHomePickerOpen] = useState(false);
 
   const [aiEnabled, setAiEnabled] = useState(true);
   const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState('');
@@ -91,13 +77,6 @@ const Settings = () => {
     }
   }, [homeLat, homeLng]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.mapStyle, mapStyle);
-    } catch {
-      // ignore
-    }
-  }, [mapStyle]);
 
   const handleSaveAi = async () => {
     try {
@@ -218,15 +197,6 @@ const Settings = () => {
     }
   };
 
-  const handleResetMapView = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEYS.mapView);
-      showNotification('Map view reset', 'success');
-    } catch {
-      showNotification('Failed to reset map view', 'error');
-    }
-  };
-
   const handleResetDatabase = async () => {
     setResetWorking(true);
     try {
@@ -324,6 +294,20 @@ const Settings = () => {
             >
               Recalculate from data
             </button>
+
+            <button
+              onClick={() => {
+                if (autoUpdateHome) {
+                  showNotification('Disable auto-update to set home manually', 'info');
+                  return;
+                }
+                setIsHomePickerOpen(true);
+              }}
+              style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee', cursor: 'pointer' }}
+            >
+              Pick on map
+            </button>
+
             <button
               onClick={handleSaveHome}
               style={{ padding: '8px 12px', borderRadius: 6, border: 'none', background: 'rgba(40, 167, 69, 0.9)', color: 'white', cursor: 'pointer' }}
@@ -334,36 +318,6 @@ const Settings = () => {
 
           <div style={{ marginTop: 10, color: '#888', fontSize: 12 }}>
             Location pickers will default to this home location when no explicit location is set.
-          </div>
-        </div>
-
-        <div style={{ background: '#1a1a1a', border: '1px solid #3a3a3a', borderRadius: 8, padding: 16 }}>
-          <h3 style={{ margin: '0 0 10px 0' }}>Map</h3>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 10, alignItems: 'center' }}>
-            <label>Map style</label>
-            <select
-              value={mapStyle}
-              onChange={(e) => setMapStyle(e.target.value)}
-              style={{ padding: 8, borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee' }}
-            >
-              <option value="day">Day</option>
-              <option value="night">Night</option>
-              <option value="satellite">Satellite</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-            <button
-              onClick={handleResetMapView}
-              style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee', cursor: 'pointer' }}
-            >
-              Reset saved map view
-            </button>
-          </div>
-
-          <div style={{ marginTop: 10, color: '#888', fontSize: 12 }}>
-            Tip: after changing map style, switch back to the Map tab to apply it.
           </div>
         </div>
 
@@ -485,6 +439,19 @@ const Settings = () => {
         )}
 
       </div>
+
+      <HomeLocationPickerModal
+        isOpen={isHomePickerOpen}
+        initialLat={homeLat}
+        initialLng={homeLng}
+        fallbackCenter={computedCenter}
+        disabled={autoUpdateHome}
+        onClose={() => setIsHomePickerOpen(false)}
+        onUse={(lat, lng) => {
+          setHomeLat(String(Number(lat).toFixed(6)));
+          setHomeLng(String(Number(lng).toFixed(6)));
+        }}
+      />
 
       <ConfirmModal
         isOpen={resetOpen}

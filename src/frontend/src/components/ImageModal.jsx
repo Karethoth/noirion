@@ -15,6 +15,8 @@ import {
   LINK_VEHICLE_PLATE_TO_ANNOTATION,
 } from '../graphql/annotations';
 import { GET_PRESENCES } from '../graphql/presences';
+import { normalizePlate } from '../utils/licensePlates';
+import { buildAssetUrl } from '../utils/assetUrls';
 
 
 const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = null }) => {
@@ -90,19 +92,6 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
     if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null);
     refetch();
   }, [deleteAnnotation, refetch, selectedAnnotationId]);
-
-  const normalizePlate = (p) => {
-    if (typeof p !== 'string') return null;
-    let cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
-      if (cleaned.startsWith(prefix)) {
-        const rest = cleaned.slice(prefix.length);
-        const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
-        if (looksLikePlate) cleaned = rest;
-      }
-    }
-    return cleaned || null;
-  };
 
   const maybePromptPresenceForLicensePlates = async (annotationId, tags) => {
     const plates = Array.from(
@@ -288,7 +277,7 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
         {/* Annotation Viewer */}
         <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
           <AnnotationViewer
-            image={{ ...image, filePath: `${import.meta.env.VITE_API_URL}${image.filePath}` }}
+            image={{ ...image, filePath: buildAssetUrl(image?.filePath) }}
             annotations={data?.annotations || []}
             readOnly={readOnly}
             onRefetch={refetch}

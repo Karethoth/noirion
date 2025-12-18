@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client/react';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
 import { GET_IMAGES, DELETE_IMAGE, ANALYZE_IMAGE, UPDATE_IMAGE } from '../graphql/images';
 import {
   ANALYZE_ANNOTATION_DRAFT,
@@ -17,11 +16,12 @@ import Notification from './Notification';
 import ConfirmModal from './ConfirmModal';
 import ImageUpload from './ImageUpload';
 import { useAiConfig } from '../utils/aiConfig';
-import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
+import { parseTagTokens, formatTagDisplay } from '../utils/tagTokens';
+import { normalizePlate } from '../utils/licensePlates';
+import { buildAssetUrl } from '../utils/assetUrls';
 
-// Fix for default markers in react-leaflet (same approach as ImageMap)
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
+initLeafletDefaultMarkerIcons();
 
 const AssetList = ({ readOnly = false, onEdit = null }) => {
   const { enabled: aiEnabled, model: aiModel } = useAiConfig();
@@ -104,11 +104,7 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
   const assets = useMemo(() => data?.images || [], [data?.images]);
 
   const tagFilterTokens = useMemo(() => {
-    return (tagFilterRaw || '')
-      .split(/[\s,]+/g)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => x.toLowerCase());
+    return parseTagTokens(tagFilterRaw);
   }, [tagFilterRaw]);
 
   function getTagsForImage(img) {
@@ -119,24 +115,7 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
     return Array.from(new Set(tags));
   }
 
-  const formatTag = (tag) => {
-    if (!tag) return '';
-    const t = String(tag);
-    return t.startsWith('general:') ? t.slice(8) : t;
-  };
-
-  const normalizePlate = (p) => {
-    if (typeof p !== 'string') return null;
-    let cleaned = p.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-    for (const prefix of ['FIN', 'SF', 'SWE', 'EST', 'EU']) {
-      if (cleaned.startsWith(prefix)) {
-        const rest = cleaned.slice(prefix.length);
-        const looksLikePlate = /[0-9]/.test(rest) && /[A-Z]/.test(rest) && rest.length >= 4;
-        if (looksLikePlate) cleaned = rest;
-      }
-    }
-    return cleaned || null;
-  };
+  const formatTag = formatTagDisplay;
 
   const buildPresenceRows = (plates) => {
     const list = Array.isArray(plates) ? plates : [];
@@ -473,8 +452,7 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
   };
 
   const assetPreviewUrl = (img) => {
-    if (!img?.filePath) return null;
-    return `${import.meta.env.VITE_API_URL}${img.filePath}`;
+    return buildAssetUrl(img?.filePath);
   };
 
   const currentApproval = presenceApprovalQueue[presenceApprovalIndex] || null;

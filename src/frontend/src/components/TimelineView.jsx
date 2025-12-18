@@ -5,72 +5,21 @@ import Notification from './Notification';
 import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './TimelineView.css';
-import L from 'leaflet';
-import { LEAFLET_DEFAULT_MARKER_ICON_URLS } from '../utils/externalUrls';
+import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
 import { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT } from '../graphql/events';
 import { GET_PRESENCES, DELETE_PRESENCE } from '../graphql/presences';
 import { formatMGRS, parseMGRS } from '../utils/coordinates';
 import TagPickerModal from './TagPickerModal';
+import MapStyleController from './MapStyleController';
+import { MAP_STYLES } from '../utils/mapStyles';
+import { loadSavedMapView } from '../utils/mapViewStorage';
+import { toDatetimeLocalValue } from '../utils/datetimeLocal';
+import { parseTagTokens } from '../utils/tagTokens';
 
-// Fix for default markers in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions(LEAFLET_DEFAULT_MARKER_ICON_URLS);
+initLeafletDefaultMarkerIcons();
 
 export { GET_EVENTS, CREATE_EVENT, DELETE_EVENT, UPDATE_EVENT };
 export { GET_PRESENCES };
-
-// Mirror the Map tab basemap configuration
-const MAP_STYLES = {
-  day: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  },
-  night: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-  },
-  satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri'
-  }
-};
-
-function MapStyleController({ style }) {
-  const map = useMap();
-
-  useEffect(() => {
-    const container = map.getContainer();
-    container.classList.remove('map-style-day', 'map-style-night', 'map-style-satellite');
-    if (style && style !== 'day') {
-      container.classList.add(`map-style-${style}`);
-    }
-  }, [style, map]);
-
-  return null;
-}
-
-function getSavedMapView() {
-  try {
-    const raw = localStorage.getItem('mapView');
-    if (!raw) return null;
-    const view = JSON.parse(raw);
-    if (!view?.center || typeof view?.zoom !== 'number') return null;
-    if (typeof view.center.lat !== 'number' || typeof view.center.lng !== 'number') return null;
-    return view;
-  } catch {
-    return null;
-  }
-}
-
-function toDatetimeLocalValue(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const mm = pad(date.getMonth() + 1);
-  const dd = pad(date.getDate());
-  const hh = pad(date.getHours());
-  const mi = pad(date.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-}
 
 const TimelineView = ({
   userRole,
@@ -176,11 +125,7 @@ const TimelineView = ({
   }, [events, presences]);
 
   const filterTagTokens = useMemo(() => {
-    return (filterTagsRaw || '')
-      .split(/[\s,]+/g)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => x.toLowerCase());
+    return parseTagTokens(filterTagsRaw);
   }, [filterTagsRaw]);
 
   const tagCounts = useMemo(() => {
@@ -539,7 +484,7 @@ const TimelineView = ({
   }) => {
     if (!isOpen) return null;
 
-    const saved = getSavedMapView();
+    const saved = loadSavedMapView('mapView');
     const fallbackCenter = saved?.center ? [saved.center.lat, saved.center.lng] : [60.1699, 24.9384];
     const fallbackZoom = typeof saved?.zoom === 'number' ? saved.zoom : 4;
 
