@@ -31,6 +31,7 @@ const Settings = () => {
   const [isHomePickerOpen, setIsHomePickerOpen] = useState(false);
 
   const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiSendExif, setAiSendExif] = useState(false);
   const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState('');
   const [lmStudioModel, setLmStudioModel] = useState('');
   const [lmStudioModelsOpen, setLmStudioModelsOpen] = useState(false);
@@ -64,6 +65,7 @@ const Settings = () => {
     setHomeLng(s.homeLng == null ? '' : String(s.homeLng));
 
      setAiEnabled(s.aiEnabled !== false);
+      setAiSendExif(!!s.aiSendExif);
      setLmStudioBaseUrl(String(s.lmStudioBaseUrl || ''));
      setLmStudioModel(String(s.lmStudioModel || ''));
   }, [data?.projectSettings]);
@@ -89,6 +91,7 @@ const Settings = () => {
         variables: {
           input: {
             aiEnabled: !!aiEnabled,
+            aiSendExif: !!aiSendExif,
             lmStudioBaseUrl: baseUrl === '' ? null : baseUrl,
             lmStudioModel: model === '' ? null : model,
           },
@@ -349,6 +352,16 @@ const Settings = () => {
               onChange={(e) => setAiEnabled(e.target.checked)}
             />
             Enable AI features
+          </label>
+
+          <label style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, color: aiEnabled ? '#e0e0e0' : '#777' }}>
+            <input
+              type="checkbox"
+              checked={aiSendExif}
+              disabled={!aiEnabled}
+              onChange={(e) => setAiSendExif(e.target.checked)}
+            />
+            Send EXIF metadata to AI (privacy-sensitive)
           </label>
 
           <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 10, alignItems: 'center' }}>

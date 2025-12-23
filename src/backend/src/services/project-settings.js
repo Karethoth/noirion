@@ -5,6 +5,7 @@ const KEYS = {
   homeLocation: 'project.homeLocation',
   homeAutoUpdate: 'project.homeAutoUpdate',
   aiEnabled: 'ai.enabled',
+  aiSendExif: 'ai.sendExif',
   lmStudioBaseUrl: 'ai.lmStudio.baseUrl',
   lmStudioModel: 'ai.lmStudio.model',
 };
@@ -156,6 +157,9 @@ export class ProjectSettingsService {
     const aiEnabledRaw = await this.#getValue(KEYS.aiEnabled);
     const aiEnabled = normalizeBoolean(aiEnabledRaw, true);
 
+    const aiSendExifRaw = await this.#getValue(KEYS.aiSendExif);
+    const aiSendExif = normalizeBoolean(aiSendExifRaw, false);
+
     const lmStudioBaseUrlRaw = await this.#getValue(KEYS.lmStudioBaseUrl);
     const lmStudioBaseUrl = normalizeBaseUrl(lmStudioBaseUrlRaw) || (cfg?.lmStudio?.baseUrl || 'http://127.0.0.1:1234');
 
@@ -167,13 +171,14 @@ export class ProjectSettingsService {
       homeLng,
       homeAutoUpdate: !!autoUpdate,
       aiEnabled: !!aiEnabled,
+      aiSendExif: !!aiSendExif,
       lmStudioBaseUrl: String(lmStudioBaseUrl || '').replace(/\/$/, ''),
       lmStudioModel: lmStudioModel ? String(lmStudioModel) : null,
     };
   }
 
   async updateProjectSettings(
-    { homeLat, homeLng, homeAutoUpdate, aiEnabled, lmStudioBaseUrl, lmStudioModel } = {},
+    { homeLat, homeLng, homeAutoUpdate, aiEnabled, aiSendExif, lmStudioBaseUrl, lmStudioModel } = {},
     updatedBy
   ) {
     if (homeAutoUpdate !== undefined) {
@@ -182,6 +187,10 @@ export class ProjectSettingsService {
 
     if (aiEnabled !== undefined) {
       await this.#setValue(KEYS.aiEnabled, !!aiEnabled, updatedBy);
+    }
+
+    if (aiSendExif !== undefined) {
+      await this.#setValue(KEYS.aiSendExif, !!aiSendExif, updatedBy);
     }
 
     if (lmStudioBaseUrl !== undefined) {

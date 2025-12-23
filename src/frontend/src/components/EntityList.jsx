@@ -21,7 +21,9 @@ const EntityList = ({ onSelectEntity, userRole, onRefetchReady }) => {
       entityType: entityTypeFilter || null,
       limit: 100,
       offset: 0
-    }
+    },
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
   });
 
   // Expose refetch function to parent

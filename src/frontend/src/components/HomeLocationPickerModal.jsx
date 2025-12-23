@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import { formatMGRS } from '../utils/coordinates';
 import { initLeafletDefaultMarkerIcons } from '../utils/leafletInit';
-import { MAP_STYLES, loadSavedMapStyle } from '../utils/mapStyles';
+import { MAP_STYLES, loadSavedMapStyle, saveMapStyle } from '../utils/mapStyles';
 import { loadSavedMapView } from '../utils/mapViewStorage';
 import MapStyleController from './MapStyleController';
 
@@ -57,7 +57,7 @@ export default function HomeLocationPickerModal({
   onUse,
   disabled = false,
 }) {
-  const mapStyle = useMemo(() => loadSavedMapStyle('mapStyle'), []);
+  const [mapStyle, setMapStyle] = useState(() => loadSavedMapStyle('mapStyle'));
   const styleCfg = MAP_STYLES[mapStyle] || MAP_STYLES.day;
 
   const [pickedLat, setPickedLat] = useState(null);
@@ -73,6 +73,10 @@ export default function HomeLocationPickerModal({
     if (view && Number.isFinite(view.zoom)) return Math.max(3, Math.min(22, view.zoom));
     return 12;
   }, []);
+
+  useEffect(() => {
+    saveMapStyle(mapStyle, 'mapStyle');
+  }, [mapStyle]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -161,14 +165,35 @@ export default function HomeLocationPickerModal({
           </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div
+          className={mapStyle === 'day' ? 'map-ui-light' : 'map-ui-dark'}
+          style={{ flex: 1, minHeight: 0, position: 'relative' }}
+        >
+          <div className="map-style-toggle">
+            {Object.entries(MAP_STYLES).map(([key, style]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMapStyle(key)}
+                className={`map-style-button ${mapStyle === key ? 'active' : ''}`}
+              >
+                {style.name}
+              </button>
+            ))}
+          </div>
+
           <MapContainer
             center={center}
             zoom={zoom}
             style={{ height: '100%', width: '100%' }}
             maxZoom={22}
           >
-            <TileLayer attribution={styleCfg.attribution} url={styleCfg.url} maxNativeZoom={19} />
+            <TileLayer
+              key={mapStyle}
+              attribution={styleCfg.attribution}
+              url={styleCfg.url}
+              maxNativeZoom={19}
+            />
             <MapStyleController style={mapStyle} />
             {!disabled && (
               <ClickToPick

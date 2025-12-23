@@ -7,6 +7,7 @@ export const GET_PROJECT_SETTINGS = gql`
       homeLng
       homeAutoUpdate
       aiEnabled
+      aiSendExif
       lmStudioBaseUrl
       lmStudioModel
     }
@@ -20,6 +21,7 @@ export const UPDATE_PROJECT_SETTINGS = gql`
       homeLng
       homeAutoUpdate
       aiEnabled
+      aiSendExif
       lmStudioBaseUrl
       lmStudioModel
     }
@@ -33,6 +35,7 @@ export const RECALCULATE_PROJECT_HOME_LOCATION = gql`
       homeLng
       homeAutoUpdate
       aiEnabled
+      aiSendExif
       lmStudioBaseUrl
       lmStudioModel
     }

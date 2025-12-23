@@ -11,6 +11,135 @@ import { ProjectSettingsService } from './project-settings.js';
 const MODEL_CACHE = new Map();
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 
+function safeStringify(value) {
+  try {
+    return JSON.stringify(
+      value,
+      (k, v) => {
+        if (typeof v === 'bigint') return String(v);
+        if (v instanceof Date) return v.toISOString();
+        return v;
+      },
+      2
+    );
+  } catch {
+    try {
+      return JSON.stringify(String(value));
+    } catch {
+      return '"<unserializable>"';
+    }
+  }
+}
+
+function buildExifContextForAi(asset) {
+  const raw = asset?.exifData;
+  const rawIsObject = raw && typeof raw === 'object' && !Array.isArray(raw);
+  const hasRaw = rawIsObject && Object.keys(raw).length > 0;
+
+  const summary = {
+    captureTimestamp: asset?.captureTimestamp || null,
+    latitude: asset?.latitude ?? null,
+    longitude: asset?.longitude ?? null,
+    altitude: asset?.altitude ?? null,
+    orientation: asset?.orientation ?? null,
+    cameraMake: asset?.cameraMake || null,
+    cameraModel: asset?.cameraModel || null,
+    lens: asset?.lens || null,
+    iso: asset?.iso ?? null,
+    aperture: asset?.aperture ?? null,
+    shutterSpeed: asset?.shutterSpeed ?? null,
+    focalLength: asset?.focalLength ?? null,
+    focalLength35mm: asset?.focalLength35mm ?? null,
+    flash: asset?.flash ?? null,
+    flashMode: asset?.flashMode || null,
+    software: asset?.software || null,
+    artist: asset?.artist || null,
+    copyright: asset?.copyright || null,
+  };
+
+  // Keep the raw payload bounded; send a curated subset of common EXIF keys.
+  const rawPicked = {};
+  if (hasRaw) {
+    const allowed = new Set(
+      [
+        'datetimeoriginal',
+        'createdate',
+        'modifydate',
+        'make',
+        'model',
+        'lensmodel',
+        'lens',
+        'orientation',
+        'gpslatitude',
+        'gpslongitude',
+        'gpsaltitude',
+        'iso',
+        'isospeedratings',
+        'fnumber',
+        'exposuretime',
+        'shutterspeedvalue',
+        'focallength',
+        'focallengthin35mmformat',
+        'software',
+        'artist',
+        'copyright',
+      ]
+    );
+
+    for (const [key, value] of Object.entries(raw)) {
+      const lower = String(key).toLowerCase();
+      if (!allowed.has(lower) && !lower.startsWith('gps') && !lower.includes('date') && !lower.includes('time')) {
+        continue;
+      }
+
+      // Only include JSON-friendly, reasonably small values.
+      if (value == null) {
+        rawPicked[key] = null;
+        continue;
+      }
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        rawPicked[key] = value;
+        continue;
+      }
+      if (value instanceof Date) {
+        rawPicked[key] = value.toISOString();
+        continue;
+      }
+      if (Array.isArray(value) && value.length <= 32) {
+        rawPicked[key] = value;
+        continue;
+      }
+      if (typeof value === 'object') {
+        // Allow simple nested objects; avoid massive blobs.
+        const keys = Object.keys(value);
+        if (keys.length <= 32) rawPicked[key] = value;
+      }
+    }
+  }
+
+  const payload = {
+    summary,
+    exif: Object.keys(rawPicked).length > 0 ? rawPicked : null,
+  };
+
+  // If nothing useful, skip.
+  const summaryHasAny = Object.values(summary).some((v) => v !== null && v !== undefined && v !== '');
+  const hasAny = summaryHasAny || payload.exif;
+  if (!hasAny) return null;
+
+  const text = safeStringify(payload);
+
+  // Safety cap: avoid huge prompts.
+  const maxChars = 6000;
+  const capped = text.length > maxChars ? `${text.slice(0, maxChars)}\n...<truncated>` : text;
+  return (
+    'EXIF metadata (use as optional context; it may be missing or inaccurate):\n' +
+    '```json\n' +
+    capped +
+    '\n```'
+  );
+}
+
 function isLikelyVisionModelId(id) {
   const s = String(id || '').toLowerCase();
   if (!s) return false;
@@ -168,6 +297,7 @@ export class ImageAnalysisService {
     this.defaultModel = defaultModel || null;
     this.timeoutMs = timeoutMs || null;
     this.aiEnabled = true;
+    this.aiSendExif = false;
   }
 
   async #ensureConfig() {
@@ -182,6 +312,7 @@ export class ImageAnalysisService {
     }
 
     this.aiEnabled = project?.aiEnabled !== false;
+    this.aiSendExif = project?.aiSendExif === true;
 
     const baseUrlFromProject = project?.lmStudioBaseUrl ? String(project.lmStudioBaseUrl) : null;
     const modelFromProject = project?.lmStudioModel ? String(project.lmStudioModel) : null;
@@ -364,10 +495,13 @@ export class ImageAnalysisService {
       throw new Error('LM Studio model not configured. Set LM_STUDIO_MODEL or pass model argument.');
     }
 
+    const exifContext = this.aiSendExif ? buildExifContextForAi(asset) : null;
+
     const analysis = await this.#callLmStudioVision({
       model: selectedModel,
       imageBuffer: prepared.buffer,
       mimeType: prepared.mimeType,
+      exifContext,
     });
 
     const result = {
@@ -440,10 +574,13 @@ export class ImageAnalysisService {
       throw new Error('LM Studio model not configured. Set LM_STUDIO_MODEL or pass model argument.');
     }
 
+    const exifContext = this.aiSendExif ? buildExifContextForAi(asset) : null;
+
     const analysis = await this.#callLmStudioVisionForAnnotation({
       model: selectedModel,
       imageBuffer: prepared.buffer,
       mimeType: prepared.mimeType,
+      exifContext,
     });
 
     // Persist a run record for debugging/history (including the exact image bytes sent to the model).
@@ -660,7 +797,7 @@ export class ImageAnalysisService {
     }
   }
 
-  async #callLmStudioVision({ model, imageBuffer, mimeType }) {
+  async #callLmStudioVision({ model, imageBuffer, mimeType, exifContext = null }) {
     const imageBase64 = imageBuffer.toString('base64');
     const imageUrl = `data:${mimeType};base64,${imageBase64}`;
 
@@ -686,6 +823,7 @@ export class ImageAnalysisService {
           role: 'user',
           content: [
             { type: 'text', text: userText },
+            ...(exifContext ? [{ type: 'text', text: exifContext }] : []),
             { type: 'image_url', image_url: { url: imageUrl } },
           ],
         },
@@ -750,7 +888,7 @@ export class ImageAnalysisService {
     }
   }
 
-  async #callLmStudioVisionForAnnotation({ model, imageBuffer, mimeType }) {
+  async #callLmStudioVisionForAnnotation({ model, imageBuffer, mimeType, exifContext = null }) {
     const imageBase64 = imageBuffer.toString('base64');
     const imageUrl = `data:${mimeType};base64,${imageBase64}`;
 
@@ -778,6 +916,7 @@ export class ImageAnalysisService {
           role: 'user',
           content: [
             { type: 'text', text: userText },
+            ...(exifContext ? [{ type: 'text', text: exifContext }] : []),
             { type: 'image_url', image_url: { url: imageUrl } },
           ],
         },

@@ -113,6 +113,7 @@ export const typeDefs = `#graphql
     homeLng: Float
     homeAutoUpdate: Boolean!
       aiEnabled: Boolean!
+      aiSendExif: Boolean!
       lmStudioBaseUrl: String!
       lmStudioModel: String
   }
@@ -122,6 +123,7 @@ export const typeDefs = `#graphql
     homeLng: Float
     homeAutoUpdate: Boolean
       aiEnabled: Boolean
+      aiSendExif: Boolean
       lmStudioBaseUrl: String
       lmStudioModel: String
   }
