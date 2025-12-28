@@ -9,6 +9,9 @@
     images: [Image!]!
     image(id: ID!): Image
     imagesInArea(bounds: BoundsInput!): [Image!]!
+    imagesByEntity(entityId: ID!, limit: Int, offset: Int): [Image!]!
+
+    suggestImageLocationInterpolations(maxMinutes: Int): [ImageLocationInterpolationSuggestion!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
 
@@ -16,6 +19,39 @@
     entities(entityType: String, limit: Int, offset: Int): [Entity!]!
     entity(id: ID!): Entity
     searchEntities(query: String!, entityType: String, limit: Int): [Entity!]!
+
+    # Presence queries
+    presencesByEntity(entityId: ID!, limit: Int, offset: Int): [Presence!]!
+    presences(before: String, after: String, limit: Int, offset: Int): [Presence!]!
+
+    # Entity relationship queries
+    entityLinks(entityId: ID!, limit: Int, offset: Int): [EntityLink!]!
+
+    # Events
+    events(before: String, after: String, limit: Int, offset: Int): [Event!]!
+    eventsByEntity(entityId: ID!, before: String, after: String, limit: Int, offset: Int): [Event!]!
+
+    projectSettings: ProjectSettings!
+    lmStudioModels(visionOnly: Boolean = false): [LmStudioModel!]!
+    lmStudioTestVision(modelId: String!): LmStudioVisionTestResult!
+
+    annotationAiAnalysisRuns(annotationId: ID, limit: Int = 20): [AnnotationAIAnalysisRun!]!
+  }
+
+  type AnnotationAIAnalysisRun {
+    id: ID!
+    annotationId: ID!
+    assetId: ID!
+    assetFilename: String
+    regionId: ID
+    createdAt: String!
+    createdBy: ID
+    model: String
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    cropUrl: String
+    cropDebug: JSON
   }
 
   type Mutation {
@@ -26,6 +62,12 @@
     uploadImage(file: Upload!): Image!
     uploadImages(files: [Upload!]!): [Image!]!
     deleteImage(id: ID!): Boolean!
+    updateImage(id: ID!, input: UpdateImageInput!): Image!
+    setImageAutoPresenceIgnoredEntities(imageId: ID!, ignoredEntityIds: [ID!]!): Image!
+
+    analyzeImage(id: ID!, model: String, persist: Boolean = true): ImageAIAnalysis!
+    analyzeAnnotation(annotationId: ID!, regionId: ID, model: String, persist: Boolean = true): AnnotationAIAnalysis!
+    analyzeAnnotationDraft(assetId: ID!, input: AddRegionInput!, model: String): AnnotationAIAnalysis!
 
     # Annotation mutations
     createAnnotation(input: CreateAnnotationInput!): Annotation!
@@ -45,9 +87,79 @@
 
     # Entity-Annotation linking mutations
     linkEntityToAnnotation(annotationId: ID!, entityId: ID!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
+    linkVehiclePlateToAnnotation(annotationId: ID!, plate: String!, relationType: String, confidence: Float, notes: String): AnnotationEntityLink!
     unlinkEntityFromAnnotation(linkId: ID!): AnnotationEntityLink!
+
+    # Presence mutations
+    createPresence(input: CreatePresenceInput!): Presence!
+    deletePresence(id: ID!): Boolean!
+
+    # Entity relationship mutations
+    createEntityLink(input: CreateEntityLinkInput!): EntityLink!
+    deleteEntityLink(id: ID!): Boolean!
+
+    # Events
+    createEvent(input: CreateEventInput!): Event!
+    updateEvent(id: ID!, input: UpdateEventInput!): Event!
+    deleteEvent(id: ID!): Boolean!
+
+    updateProjectSettings(input: UpdateProjectSettingsInput!): ProjectSettings!
+    recalculateProjectHomeLocation: ProjectSettings!
+
+    # Dev/admin only
+    devResetDatabase(confirm: String!): Boolean!
   }
 
+  type ProjectSettings {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean!
+      aiEnabled: Boolean!
+      aiSendExif: Boolean!
+      lmStudioBaseUrl: String!
+      lmStudioModel: String
+      locationInterpolationMaxMinutes: Int!
+  }
+
+  input UpdateProjectSettingsInput {
+    homeLat: Float
+    homeLng: Float
+    homeAutoUpdate: Boolean
+      aiEnabled: Boolean
+      aiSendExif: Boolean
+      lmStudioBaseUrl: String
+      lmStudioModel: String
+      locationInterpolationMaxMinutes: Int
+  }
+
+  type ImageLocationInterpolationSuggestion {
+    imageId: ID!
+    captureTimestamp: String!
+    cameraMake: String
+    cameraModel: String
+    proposedLatitude: Float!
+    proposedLongitude: Float!
+    prevImageId: ID!
+    prevCaptureTimestamp: String!
+    prevLatitude: Float!
+    prevLongitude: Float!
+    nextImageId: ID!
+    nextCaptureTimestamp: String!
+    nextLatitude: Float!
+    nextLongitude: Float!
+    spanMinutes: Float!
+  }
+
+  type LmStudioModel {
+    id: String!
+    isVision: Boolean!
+  }
+
+  type LmStudioVisionTestResult {
+    ok: Boolean!
+    isVision: Boolean!
+    message: String
+  }
   type AuthPayload {
     token: String!
     user: User!
@@ -68,6 +180,7 @@
     id: ID!
     filename: String!
     originalName: String!
+    displayName: String
     filePath: String!
     sha256Hash: String!
     fileSize: Int!
@@ -78,6 +191,8 @@
     # GPS and location data
     latitude: Float
     longitude: Float
+    subjectLatitude: Float
+    subjectLongitude: Float
     altitude: Float
     orientation: Int
 
@@ -120,8 +235,42 @@
     exifData: JSON
     metadata: JSON
 
+    # AI-derived metadata
+    aiAnalysis: ImageAIAnalysis
+
     # Relationships
     annotations: [Annotation!]!
+  }
+
+  input UpdateImageInput {
+    displayName: String
+    latitude: Float
+    longitude: Float
+    subjectLatitude: Float
+    subjectLongitude: Float
+    altitude: Float
+    captureTimestamp: String
+  }
+
+  type ImageAIAnalysis {
+    caption: String
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
+  }
+
+  type AnnotationAIAnalysis {
+    caption: String
+    tags: [String!]!
+    licensePlates: [String!]!
+    model: String
+    createdAt: String
+    raw: JSON
+     runId: ID
+     cropUrl: String
+     cropDataUrl: String
+     cropDebug: JSON
   }
 
   input BoundsInput {
@@ -152,6 +301,7 @@
     createdAt: String!
     updatedAt: String!
     metadata: JSON
+    aiAnalysis: AnnotationAIAnalysis
   }
 
   type AnnotationRegion {
@@ -220,6 +370,117 @@
     confidence: Float
     createdAt: String!
     updatedAt: String!
+  }
+
+  type EntityLink {
+    id: ID!
+    fromEntityId: ID!
+    toEntityId: ID!
+    fromEntity: Entity
+    toEntity: Entity
+    relationType: String!
+    confidence: Float
+    notes: String
+    createdAt: String
+    createdBy: ID
+    metadata: JSON
+  }
+
+  type Event {
+    id: ID!
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    createdBy: ID
+    createdAt: String
+    metadata: JSON
+    entities: [EventEntity!]!
+  }
+
+  type EventEntity {
+
+    eventId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input EventEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
+  }
+
+  input CreateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    metadata: JSON
+    entities: [EventEntityInput!]
+  }
+
+  input UpdateEventInput {
+    occurredAt: String!
+    latitude: Float
+    longitude: Float
+    title: String!
+    description: String
+    metadata: JSON
+    entities: [EventEntityInput!]
+  }
+
+  input CreateEntityLinkInput {
+    fromEntityId: ID!
+    toEntityId: ID!
+    relationType: String!
+    confidence: Float
+    notes: String
+    metadata: JSON
+  }
+
+  type Presence {
+    id: ID!
+    observedAt: String!
+    observedBy: ID
+    sourceAssetId: ID
+    sourceAsset: Image
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    createdAt: String
+    entities: [PresenceEntity!]!
+  }
+
+  type PresenceEntity {
+    presenceId: ID!
+    entityId: ID!
+    entity: Entity
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceEntityInput {
+    entityId: ID!
+    role: String
+    confidence: Float
+  }
+
+  input CreatePresenceInput {
+    observedAt: String!
+    sourceAssetId: ID
+    sourceType: String
+    latitude: Float
+    longitude: Float
+    notes: String
+    metadata: JSON
+    entities: [CreatePresenceEntityInput!]!
   }
 
   input CreateEntityInput {

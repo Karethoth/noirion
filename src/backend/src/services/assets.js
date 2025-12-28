@@ -42,7 +42,9 @@ export class AssetsService {
                  m.capture_timestamp as manual_capture_timestamp,
                  m.altitude as manual_altitude,
                  ST_Y(COALESCE(m.gps, e.gps)) as latitude,
-                 ST_X(COALESCE(m.gps, e.gps)) as longitude
+                   ST_X(COALESCE(m.gps, e.gps)) as longitude,
+                   ST_Y(m.subject_gps) as subject_latitude,
+                   ST_X(m.subject_gps) as subject_longitude
           FROM assets a
           LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
           LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
@@ -86,6 +88,8 @@ export class AssetsService {
           COALESCE(m.capture_timestamp, e.capture_timestamp, a.uploaded_at) as observed_at,
           ST_Y(COALESCE(m.gps, e.gps)) as latitude,
           ST_X(COALESCE(m.gps, e.gps)) as longitude,
+          ST_Y(m.subject_gps) as subject_latitude,
+          ST_X(m.subject_gps) as subject_longitude,
           COALESCE(a.metadata, '{}'::jsonb) as metadata
         FROM assets a
         LEFT JOIN asset_metadata_manual m ON m.asset_id = a.id
@@ -101,7 +105,17 @@ export class AssetsService {
     const observedAt = info.observed_at ? new Date(info.observed_at) : null;
     const latitude = info.latitude !== null && info.latitude !== undefined ? Number(info.latitude) : null;
     const longitude = info.longitude !== null && info.longitude !== undefined ? Number(info.longitude) : null;
-    const hasPoint = Number.isFinite(latitude) && Number.isFinite(longitude);
+    const subjectLatitude = info.subject_latitude !== null && info.subject_latitude !== undefined
+      ? Number(info.subject_latitude)
+      : null;
+    const subjectLongitude = info.subject_longitude !== null && info.subject_longitude !== undefined
+      ? Number(info.subject_longitude)
+      : null;
+
+    const useSubject = Number.isFinite(subjectLatitude) && Number.isFinite(subjectLongitude);
+    const presenceLat = useSubject ? subjectLatitude : latitude;
+    const presenceLng = useSubject ? subjectLongitude : longitude;
+    const hasPoint = Number.isFinite(presenceLat) && Number.isFinite(presenceLng);
 
     // Time is required for any timeline presence. If we can't determine it, bail.
     if (!observedAt || Number.isNaN(observedAt.getTime())) return;
@@ -180,8 +194,8 @@ export class AssetsService {
             userId || null,
             assetId,
             'annotation_entity_link',
-            longitude,
-            latitude,
+            presenceLng,
+            presenceLat,
             null,
             JSON.stringify({ autoFromAsset: true })
           ]
@@ -208,7 +222,7 @@ export class AssetsService {
                 metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{autoFromAsset}', 'true'::jsonb, true)
               WHERE id = $1
             `,
-            [existingPresence.rows[0].id, observedAt, longitude, latitude]
+            [existingPresence.rows[0].id, observedAt, presenceLng, presenceLat]
           );
         } else {
           await client.query(
@@ -281,7 +295,7 @@ export class AssetsService {
 
   async updateAssetManualMetadata(
     assetId,
-    { displayName, latitude, longitude, altitude, captureTimestamp } = {},
+    { displayName, latitude, longitude, subjectLatitude, subjectLongitude, altitude, captureTimestamp } = {},
     userId = null
   ) {
     const client = await this.dbPool.connect();
@@ -293,17 +307,71 @@ export class AssetsService {
         throw new Error('Both latitude and longitude must be provided together');
       }
 
-      const displayNameNorm = displayName === '' ? null : displayName;
-      const altitudeNorm = altitude === '' ? null : altitude;
-      const captureNorm = captureTimestamp === '' ? null : captureTimestamp;
+      const hasSubjectLat = subjectLatitude !== undefined && subjectLatitude !== null && subjectLatitude !== '';
+      const hasSubjectLng = subjectLongitude !== undefined && subjectLongitude !== null && subjectLongitude !== '';
+      if ((hasSubjectLat && !hasSubjectLng) || (!hasSubjectLat && hasSubjectLng)) {
+        throw new Error('Both subjectLatitude and subjectLongitude must be provided together');
+      }
+
+      // Treat this as a PATCH:
+      // - `undefined` means "no change"
+      // - `''` means "clear" (stored as NULL)
+      // - otherwise means "set"
+      const displayNameMode = displayName === undefined ? 'keep' : (displayName === '' ? 'clear' : 'set');
+      const altitudeMode = altitude === undefined ? 'keep' : (altitude === '' ? 'clear' : 'set');
+      const captureMode = captureTimestamp === undefined ? 'keep' : (captureTimestamp === '' ? 'clear' : 'set');
+
+      const displayNameNorm = displayNameMode === 'set' ? displayName : null;
+      const altitudeNorm = altitudeMode === 'set' ? altitude : null;
+      const captureNorm = captureMode === 'set' ? captureTimestamp : null;
 
       const params = [assetId, displayNameNorm, altitudeNorm, captureNorm, userId];
+      const pushParam = (v) => {
+        params.push(v);
+        return `$${params.length}`;
+      };
+
+      const gpsMode = (hasLat && hasLng)
+        ? 'set'
+        : (latitude === null && longitude === null ? 'clear' : 'keep');
+
       let gpsSql = 'NULL';
-      if (hasLat && hasLng) {
-        params.push(Number(longitude));
-        params.push(Number(latitude));
-        gpsSql = 'ST_SetSRID(ST_MakePoint($6, $7), 4326)';
+      if (gpsMode === 'set') {
+        const lngP = pushParam(Number(longitude));
+        const latP = pushParam(Number(latitude));
+        gpsSql = `ST_SetSRID(ST_MakePoint(${lngP}, ${latP}), 4326)`;
       }
+
+      const subjectGpsMode = (hasSubjectLat && hasSubjectLng)
+        ? 'set'
+        : (subjectLatitude === null && subjectLongitude === null ? 'clear' : 'keep');
+
+      let subjectGpsSql = 'NULL';
+      if (subjectGpsMode === 'set') {
+        const subjLngP = pushParam(Number(subjectLongitude));
+        const subjLatP = pushParam(Number(subjectLatitude));
+        subjectGpsSql = `ST_SetSRID(ST_MakePoint(${subjLngP}, ${subjLatP}), 4326)`;
+      }
+
+      const displayNameAssign = displayNameMode === 'set'
+        ? 'display_name = EXCLUDED.display_name'
+        : (displayNameMode === 'clear' ? 'display_name = NULL' : 'display_name = asset_metadata_manual.display_name');
+
+      const altitudeAssign = altitudeMode === 'set'
+        ? 'altitude = EXCLUDED.altitude'
+        : (altitudeMode === 'clear' ? 'altitude = NULL' : 'altitude = asset_metadata_manual.altitude');
+
+      const captureAssign = captureMode === 'set'
+        ? 'capture_timestamp = EXCLUDED.capture_timestamp'
+        : (captureMode === 'clear' ? 'capture_timestamp = NULL' : 'capture_timestamp = asset_metadata_manual.capture_timestamp');
+
+      const gpsAssign = gpsMode === 'set'
+        ? 'gps = EXCLUDED.gps'
+        : (gpsMode === 'clear' ? 'gps = NULL' : 'gps = asset_metadata_manual.gps');
+
+      const subjectGpsAssign = subjectGpsMode === 'set'
+        ? 'subject_gps = EXCLUDED.subject_gps'
+        : (subjectGpsMode === 'clear' ? 'subject_gps = NULL' : 'subject_gps = asset_metadata_manual.subject_gps');
 
       await client.query(
         `INSERT INTO asset_metadata_manual (
@@ -312,17 +380,19 @@ export class AssetsService {
           altitude,
           capture_timestamp,
           gps,
+          subject_gps,
           created_by,
           updated_by,
           updated_at
         ) VALUES (
-          $1, $2, $3, $4, ${gpsSql}, $5, $5, now()
+          $1, $2, $3, $4, ${gpsSql}, ${subjectGpsSql}, $5, $5, now()
         )
         ON CONFLICT (asset_id) DO UPDATE SET
-          display_name = EXCLUDED.display_name,
-          altitude = EXCLUDED.altitude,
-          capture_timestamp = EXCLUDED.capture_timestamp,
-          gps = EXCLUDED.gps,
+          ${displayNameAssign},
+          ${altitudeAssign},
+          ${captureAssign},
+          ${gpsAssign},
+          ${subjectGpsAssign},
           updated_by = EXCLUDED.updated_by,
           updated_at = now()`,
         params
@@ -592,7 +662,9 @@ export class AssetsService {
                m.capture_timestamp as manual_capture_timestamp,
                m.altitude as manual_altitude,
                ST_Y(COALESCE(m.gps, e.gps)) as latitude,
-               ST_X(COALESCE(m.gps, e.gps)) as longitude
+               ST_X(COALESCE(m.gps, e.gps)) as longitude,
+               ST_Y(m.subject_gps) as subject_latitude,
+               ST_X(m.subject_gps) as subject_longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
         LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
@@ -620,7 +692,9 @@ export class AssetsService {
                m.capture_timestamp as manual_capture_timestamp,
                m.altitude as manual_altitude,
                ST_Y(COALESCE(m.gps, e.gps)) as latitude,
-               ST_X(COALESCE(m.gps, e.gps)) as longitude
+               ST_X(COALESCE(m.gps, e.gps)) as longitude,
+               ST_Y(m.subject_gps) as subject_latitude,
+               ST_X(m.subject_gps) as subject_longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
         LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
@@ -650,7 +724,9 @@ export class AssetsService {
                m.capture_timestamp as manual_capture_timestamp,
                m.altitude as manual_altitude,
                ST_Y(COALESCE(m.gps, e.gps)) as latitude,
-               ST_X(COALESCE(m.gps, e.gps)) as longitude
+               ST_X(COALESCE(m.gps, e.gps)) as longitude,
+               ST_Y(m.subject_gps) as subject_latitude,
+               ST_X(m.subject_gps) as subject_longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
         LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
@@ -679,7 +755,9 @@ export class AssetsService {
                m.capture_timestamp as manual_capture_timestamp,
                m.altitude as manual_altitude,
                ST_Y(COALESCE(m.gps, e.gps)) as latitude,
-               ST_X(COALESCE(m.gps, e.gps)) as longitude
+               ST_X(COALESCE(m.gps, e.gps)) as longitude,
+               ST_Y(m.subject_gps) as subject_latitude,
+               ST_X(m.subject_gps) as subject_longitude
         FROM assets a
         LEFT JOIN asset_metadata_exif e ON a.id = e.asset_id
         LEFT JOIN asset_metadata_manual m ON a.id = m.asset_id
@@ -761,6 +839,8 @@ export class AssetsService {
       height: row.height,
       latitude: row.latitude,
       longitude: row.longitude,
+      subjectLatitude: row.subject_latitude !== null && row.subject_latitude !== undefined ? Number(row.subject_latitude) : null,
+      subjectLongitude: row.subject_longitude !== null && row.subject_longitude !== undefined ? Number(row.subject_longitude) : null,
       altitude: (row.manual_altitude ?? row.altitude) !== null && (row.manual_altitude ?? row.altitude) !== undefined
         ? parseFloat(row.manual_altitude ?? row.altitude)
         : null,

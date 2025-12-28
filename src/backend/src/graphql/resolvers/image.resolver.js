@@ -183,6 +183,8 @@ const imageResolvers = {
           displayName: input.displayName,
           latitude: input.latitude,
           longitude: input.longitude,
+          subjectLatitude: input.subjectLatitude,
+          subjectLongitude: input.subjectLongitude,
           altitude: input.altitude,
           captureTimestamp: input.captureTimestamp,
         },

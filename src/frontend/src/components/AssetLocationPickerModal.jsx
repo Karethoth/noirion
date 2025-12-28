@@ -86,6 +86,7 @@ const AssetLocationPickerModal = ({
   initialLng,
   onClose,
   onUse,
+  title,
   readOnly = false,
 }) => {
   const [pickedLat, setPickedLat] = useState(null);
@@ -172,7 +173,7 @@ const AssetLocationPickerModal = ({
             color: '#e0e0e0',
           }}
         >
-          <div>Pick asset location</div>
+          <div>{String(title || 'Pick asset location')}</div>
           <button
             onClick={onClose}
             style={{

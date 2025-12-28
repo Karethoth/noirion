@@ -69,6 +69,8 @@ export const GET_IMAGES_BY_ENTITY = gql`
       cameraModel
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       aiAnalysis {
         caption
         licensePlates

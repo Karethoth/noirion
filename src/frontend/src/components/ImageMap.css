@@ -516,6 +516,11 @@
   stroke: #10b981;
 }
 
+/* Subject connection lines (asset -> subject) */
+.subject-path {
+  stroke: #facc15;
+}
+
 /* Temporary marker for edit-mode click placement */
 .custom-draft-marker {
   background: transparent;

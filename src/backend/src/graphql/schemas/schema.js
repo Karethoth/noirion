@@ -191,6 +191,8 @@ export const typeDefs = `#graphql
     # GPS and location data
     latitude: Float
     longitude: Float
+    subjectLatitude: Float
+    subjectLongitude: Float
     altitude: Float
     orientation: Int
 
@@ -244,6 +246,8 @@ export const typeDefs = `#graphql
     displayName: String
     latitude: Float
     longitude: Float
+    subjectLatitude: Float
+    subjectLongitude: Float
     altitude: Float
     captureTimestamp: String
   }

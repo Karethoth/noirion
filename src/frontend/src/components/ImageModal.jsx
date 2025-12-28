@@ -19,7 +19,7 @@ import { normalizePlate } from '../utils/licensePlates';
 import { buildAssetUrl } from '../utils/assetUrls';
 
 
-const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = null }) => {
+const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = null, onSetSubjectFromMap = null }) => {
   const { enabled: aiEnabled, model: aiModel } = useAiConfig();
   const apolloClient = useApolloClient();
   const { data, refetch } = useQuery(GET_ANNOTATIONS, {
@@ -106,7 +106,9 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
 
     if (!annotationId || plates.length === 0) return;
 
-    const hasCoords = Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude));
+    const hasCoords =
+      (Number.isFinite(Number(image?.subjectLatitude)) && Number.isFinite(Number(image?.subjectLongitude))) ||
+      (Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude)));
     const hasTime = !!(image?.captureTimestamp || image?.uploadedAt);
     if (!hasCoords || !hasTime) {
       showNotification('License plate detected, but presence generation requires timestamp + coordinates on the image', 'info');
@@ -345,23 +347,25 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
           overflowY: 'auto'
         }}>
           <h3 style={{ margin: '0 0 10px 0', color: '#e0e0e0' }}>{image.filename}</h3>
-          {!readOnly && aiEnabled && (
-            <div style={{ marginBottom: '10px', display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button
-                onClick={handleAnalyze}
-                disabled={analyzing}
-                style={{
-                  padding: '6px 10px',
-                  background: analyzing ? '#6c757d' : 'rgba(0, 123, 255, 0.9)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  cursor: analyzing ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {analyzing ? '⏳ Analyzing...' : '🧠 Analyze (LM Studio)'}
-              </button>
+          {!readOnly && (
+            <div style={{ marginBottom: '10px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {aiEnabled && (
+                <button
+                  onClick={handleAnalyze}
+                  disabled={analyzing}
+                  style={{
+                    padding: '6px 10px',
+                    background: analyzing ? '#6c757d' : 'rgba(0, 123, 255, 0.9)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    cursor: analyzing ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {analyzing ? '⏳ Analyzing...' : '🧠 Analyze (LM Studio)'}
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (typeof onEditDetails === 'function' && image?.id) onEditDetails(image.id);
@@ -378,6 +382,27 @@ const ImageModal = ({ image, isOpen, onClose, readOnly = false, onEditDetails = 
               >
                 ✏️ Edit details
               </button>
+
+              {!readOnly && typeof onSetSubjectFromMap === 'function' && (
+                <button
+                  onClick={() => {
+                    if (image?.id) onSetSubjectFromMap(image.id);
+                    onClose?.();
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'rgba(255, 193, 7, 0.9)',
+                    color: 'black',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                  title="Click, then click on the main map to set the subject location"
+                >
+                  🎯 Set subject on map
+                </button>
+              )}
               {aiAnalysis?.createdAt && (
                 <div style={{ color: '#b0b0b0', fontSize: '12px' }}>
                   {new Date(aiAnalysis.createdAt).toLocaleString()}

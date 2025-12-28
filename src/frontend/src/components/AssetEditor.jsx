@@ -59,10 +59,13 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
   const [displayName, setDisplayName] = useState('');
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
+  const [subjectLatitude, setSubjectLatitude] = useState('');
+  const [subjectLongitude, setSubjectLongitude] = useState('');
   const [altitude, setAltitude] = useState('');
   const [captureTimestamp, setCaptureTimestamp] = useState('');
   const [mgrsText, setMgrsText] = useState('');
   const [isPickingLocation, setIsPickingLocation] = useState(false);
+  const [isPickingSubjectLocation, setIsPickingSubjectLocation] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -117,7 +120,9 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
 
     if (!annotationId || plates.length === 0) return;
 
-    const hasCoords = Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude));
+    const hasCoords =
+      (Number.isFinite(Number(image?.subjectLatitude)) && Number.isFinite(Number(image?.subjectLongitude))) ||
+      (Number.isFinite(Number(image?.latitude)) && Number.isFinite(Number(image?.longitude)));
     const hasTime = !!(image?.captureTimestamp || image?.uploadedAt);
     if (!hasCoords || !hasTime) {
       // Auto-presence requires time + coords.
@@ -177,6 +182,8 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
     setDisplayName(image.displayName || image.filename || '');
     setLatitude(image.latitude ?? '');
     setLongitude(image.longitude ?? '');
+    setSubjectLatitude(image.subjectLatitude ?? '');
+    setSubjectLongitude(image.subjectLongitude ?? '');
     setAltitude(image.altitude ?? '');
     setCaptureTimestamp(toDatetimeLocalValue(image.captureTimestamp));
   }, [image]);
@@ -286,10 +293,17 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
     try {
       const lat = latitude === '' ? null : Number(latitude);
       const lng = longitude === '' ? null : Number(longitude);
+      const subjLat = subjectLatitude === '' ? null : Number(subjectLatitude);
+      const subjLng = subjectLongitude === '' ? null : Number(subjectLongitude);
       const alt = altitude === '' ? null : Number(altitude);
 
       if ((lat === null) !== (lng === null)) {
         showNotification('Both latitude and longitude must be provided together', 'error');
+        return;
+      }
+
+      if ((subjLat === null) !== (subjLng === null)) {
+        showNotification('Both subject latitude and subject longitude must be provided together', 'error');
         return;
       }
 
@@ -300,6 +314,8 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
             displayName: displayName === '' ? null : displayName,
             latitude: lat,
             longitude: lng,
+            subjectLatitude: subjLat,
+            subjectLongitude: subjLng,
             altitude: alt,
             captureTimestamp: fromDatetimeLocalValue(captureTimestamp),
           },
@@ -454,6 +470,19 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
         onUse={(lat, lng) => {
           setLatitude(String(lat));
           setLongitude(String(lng));
+        }}
+      />
+
+      <AssetLocationPickerModal
+        isOpen={isPickingSubjectLocation}
+        readOnly={readOnly}
+        title="Pick subject location"
+        initialLat={subjectLatitude === '' ? null : Number(subjectLatitude)}
+        initialLng={subjectLongitude === '' ? null : Number(subjectLongitude)}
+        onClose={() => setIsPickingSubjectLocation(false)}
+        onUse={(lat, lng) => {
+          setSubjectLatitude(String(lat));
+          setSubjectLongitude(String(lng));
         }}
       />
 
@@ -617,6 +646,43 @@ const AssetEditor = ({ assetId, onBack, readOnly = false }) => {
               placeholder="Optional"
               style={{ padding: 8, borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee' }}
             />
+
+            <div style={{ gridColumn: '1 / -1', height: 1, background: '#2a2a2a', margin: '6px 0' }} />
+
+            <label>Subject latitude</label>
+            <input
+              value={subjectLatitude}
+              disabled={readOnly}
+              onChange={(e) => setSubjectLatitude(e.target.value)}
+              placeholder="Optional"
+              style={{ padding: 8, borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee' }}
+            />
+
+            <label>Subject longitude</label>
+            <input
+              value={subjectLongitude}
+              disabled={readOnly}
+              onChange={(e) => setSubjectLongitude(e.target.value)}
+              placeholder="Optional"
+              style={{ padding: 8, borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee' }}
+            />
+
+            <label>Set subject</label>
+            <button
+              disabled={readOnly}
+              onClick={() => setIsPickingSubjectLocation(true)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 6,
+                border: 'none',
+                background: readOnly ? '#6c757d' : 'rgba(23, 162, 184, 0.9)',
+                color: 'white',
+                cursor: readOnly ? 'not-allowed' : 'pointer',
+                justifySelf: 'start',
+              }}
+            >
+              Pick on map…
+            </button>
           </div>
 
           {!readOnly && (

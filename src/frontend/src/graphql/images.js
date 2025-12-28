@@ -12,6 +12,8 @@ export const GET_IMAGES = gql`
       height
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       captureTimestamp
       cameraMake
       cameraModel
@@ -52,6 +54,8 @@ export const GET_IMAGE = gql`
       height
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       altitude
       captureTimestamp
       uploadedAt
@@ -109,6 +113,8 @@ export const UPDATE_IMAGE = gql`
       fileSize
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       altitude
       captureTimestamp
       uploadedAt
@@ -148,6 +154,8 @@ export const UPLOAD_IMAGE = gql`
       fileSize
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       captureTimestamp
       uploadedAt
     }
@@ -163,6 +171,8 @@ export const UPLOAD_IMAGES = gql`
       fileSize
       latitude
       longitude
+      subjectLatitude
+      subjectLongitude
       captureTimestamp
       uploadedAt
     }

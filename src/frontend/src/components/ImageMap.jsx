@@ -15,7 +15,7 @@ import EntitySearch from './EntitySearch';
 import 'leaflet/dist/leaflet.css';
 import './ImageMap.css';
 import L from 'leaflet';
-import { GET_IMAGES, DELETE_IMAGE } from '../graphql/images';
+import { GET_IMAGES, DELETE_IMAGE, UPDATE_IMAGE } from '../graphql/images';
 import { GET_EVENTS, CREATE_EVENT } from '../graphql/events';
 import { GET_PRESENCES, GET_PRESENCES_BY_ENTITY, CREATE_PRESENCE, DELETE_PRESENCE } from '../graphql/presences';
 import { GET_ENTITIES, GET_IMAGES_BY_ENTITY, CREATE_ENTITY, ADD_ENTITY_ATTRIBUTE } from '../graphql/entities';
@@ -212,6 +212,7 @@ const ImageMap = ({
     fetchPolicy: 'cache-and-network'
   });
   const [deleteImage] = useMutation(DELETE_IMAGE);
+  const [updateImage] = useMutation(UPDATE_IMAGE);
   const [createEvent] = useMutation(CREATE_EVENT, {
     onCompleted: () => {
       // eventsData query will refresh via cache; map shows new marker after refetch
@@ -223,6 +224,8 @@ const ImageMap = ({
   const [addEntityAttribute] = useMutation(ADD_ENTITY_ATTRIBUTE);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [subjectPickImageId, setSubjectPickImageId] = useState(null);
+  const [subjectPickWorking, setSubjectPickWorking] = useState(false);
   const [mapStyle, setMapStyle] = useState(() => {
     // Load saved map style from localStorage, default to 'day'
     return loadSavedMapStyle('mapStyle');
@@ -231,6 +234,7 @@ const ImageMap = ({
   const [mapInstance, setMapInstance] = useState(null);
   const [mapViewVersion, setMapViewVersion] = useState(0);
   const presenceMarkerRefs = useRef(new Map());
+  const imageMarkerRefs = useRef(new Map());
   const [pendingOpenPresenceId, setPendingOpenPresenceId] = useState(null);
   const latestPresencesRef = useRef([]);
   const latestMapInstanceRef = useRef(null);
@@ -418,7 +422,21 @@ const ImageMap = ({
 
   // Memoize images with location to avoid recreating on every render
   const imagesWithLocation = useMemo(() => {
-    const images = allImages?.filter(img => img.latitude && img.longitude) || [];
+    const toFiniteNumber = (v) => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const images = (Array.isArray(allImages) ? allImages : [])
+      .map((img) => ({
+        ...img,
+        latitude: toFiniteNumber(img?.latitude),
+        longitude: toFiniteNumber(img?.longitude),
+        subjectLatitude: toFiniteNumber(img?.subjectLatitude),
+        subjectLongitude: toFiniteNumber(img?.subjectLongitude),
+      }))
+      .filter((img) => img.latitude != null && img.longitude != null);
 
     if (ignoreTimeFilter?.images) return images;
 
@@ -705,6 +723,20 @@ const ImageMap = ({
   }, [initialGeolocatedPoints]);
 
   const MapEditClickHandler = ({ enabled, onPick }) => {
+    useMapEvents({
+      click(e) {
+        if (!enabled) return;
+        const target = e.originalEvent?.target;
+        if (target && (target.closest?.('.leaflet-marker-icon') || target.closest?.('.leaflet-popup'))) {
+          return;
+        }
+        onPick(e.latlng.lat, e.latlng.lng);
+      }
+    });
+    return null;
+  };
+
+  const MapSubjectPickClickHandler = ({ enabled, onPick }) => {
     useMapEvents({
       click(e) {
         if (!enabled) return;
@@ -1105,6 +1137,9 @@ const ImageMap = ({
                   const next = !v;
                   if (!next) {
                     resetDraft();
+                  } else {
+                    // Avoid conflicting click modes.
+                    setSubjectPickImageId(null);
                   }
                   return next;
                 });
@@ -1307,10 +1342,47 @@ const ImageMap = ({
         )}
         <ViewPersistence />
         <MapEditClickHandler
-          enabled={isEditMode && canWrite}
+          enabled={isEditMode && canWrite && !subjectPickImageId}
           onPick={(lat, lng) => {
             setPickedLat(lat);
             setPickedLng(lng);
+          }}
+        />
+
+        <MapSubjectPickClickHandler
+          enabled={!isEditMode && canWrite && !!subjectPickImageId}
+          onPick={async (lat, lng) => {
+            if (!subjectPickImageId) return;
+            if (subjectPickWorking) return;
+            setSubjectPickWorking(true);
+            try {
+              const res = await updateImage({
+                variables: {
+                  id: String(subjectPickImageId),
+                  input: {
+                    subjectLatitude: lat,
+                    subjectLongitude: lng,
+                  },
+                },
+              });
+
+              const updated = res?.data?.updateImage || null;
+              if (updated && String(selectedImage?.id) === String(updated.id)) {
+                setSelectedImage((prev) => ({ ...(prev || {}), ...updated }));
+              }
+
+              if (typeof refetchImages === 'function') {
+                await refetchImages();
+              }
+
+              showNotification('Subject location set', 'success');
+              setSubjectPickImageId(null);
+            } catch (err) {
+              console.error(err);
+              showNotification(`Failed to set subject location: ${err.message}`, 'error');
+            } finally {
+              setSubjectPickWorking(false);
+            }
           }}
         />
 
@@ -1330,6 +1402,29 @@ const ImageMap = ({
             pathOptions={{ className: 'presence-path', weight: 3, opacity: 0.75 }}
           />
         ))}
+
+        {imagesWithLocation.map((img) => {
+          const lat = img?.latitude;
+          const lng = img?.longitude;
+          const subjLat = img?.subjectLatitude;
+          const subjLng = img?.subjectLongitude;
+          if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(subjLat) || !Number.isFinite(subjLng)) return null;
+          return (
+            <Polyline
+              key={`subject-path-${img.id}`}
+              positions={[[lat, lng], [subjLat, subjLng]]}
+              pathOptions={{ className: 'subject-path', weight: 3, opacity: 0.9 }}
+              eventHandlers={{
+                click: () => {
+                  const marker = imageMarkerRefs.current.get(String(img.id));
+                  if (marker && typeof marker.openPopup === 'function') {
+                    marker.openPopup();
+                  }
+                },
+              }}
+            />
+          );
+        })}
 
         {locationsWithCoordinates.map((loc) => (
           <Marker
@@ -1480,6 +1575,15 @@ const ImageMap = ({
             <Marker
               key={`marker-${groupIdx}-${image.id}`}
               position={[lat, lng]}
+              ref={(ref) => {
+                const id = String(image?.id);
+                if (!id) return;
+                if (!ref) {
+                  imageMarkerRefs.current.delete(id);
+                  return;
+                }
+                imageMarkerRefs.current.set(id, ref);
+              }}
             >
               <Popup maxWidth={280} minWidth={260}>
               <div style={{ padding: '4px' }}>
@@ -1540,7 +1644,7 @@ const ImageMap = ({
                 </div>
 
                 {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: '6px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   <button
                     onClick={() => {
                       setSelectedImage(image);
@@ -1563,6 +1667,38 @@ const ImageMap = ({
                   >
                     View Details
                   </button>
+
+                  {canWrite && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!image?.id) return;
+                        setSubjectPickImageId(String(image.id));
+                        try {
+                          mapInstance?.closePopup?.();
+                        } catch {
+                          // ignore
+                        }
+                        showNotification('Click the map to set subject location', 'info');
+                      }}
+                      style={{
+                        padding: '8px 12px',
+                        backgroundColor: 'rgba(255, 193, 7, 0.9)',
+                        color: 'black',
+                        border: 'none',
+                        borderRadius: '5px',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        transition: 'background-color 0.2s'
+                      }}
+                      title="Click, then click on the main map to set the subject location"
+                    >
+                      🎯 Set subject
+                    </button>
+                  )}
+
                   {canWrite && (
                     <button
                       onClick={() => handleDeleteImage(image.id)}
@@ -1619,6 +1755,12 @@ const ImageMap = ({
           setSelectedImage(null);
         }}
         readOnly={!canWrite}
+        onSetSubjectFromMap={(id) => {
+          if (!canWrite) return;
+          if (!id) return;
+          setSubjectPickImageId(String(id));
+          showNotification('Click the map to set subject location', 'info');
+        }}
         onEditDetails={(id) => {
           if (typeof onEditImage === 'function') onEditImage(id);
         }}

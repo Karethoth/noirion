@@ -750,7 +750,9 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
                 },
               });
 
-              const hasCoords = Number.isFinite(Number(img?.latitude)) && Number.isFinite(Number(img?.longitude));
+              const hasCoords =
+                (Number.isFinite(Number(img?.subjectLatitude)) && Number.isFinite(Number(img?.subjectLongitude))) ||
+                (Number.isFinite(Number(img?.latitude)) && Number.isFinite(Number(img?.longitude)));
               if (plates.length > 0 && hasCoords) {
                 approvals.push({ assetId: id, annotationId: targetAnn.id, plates });
               }
@@ -766,7 +768,9 @@ const AssetList = ({ readOnly = false, onEdit = null }) => {
               });
 
               const annId = created?.data?.createAnnotation?.id;
-              const hasCoords = Number.isFinite(Number(img?.latitude)) && Number.isFinite(Number(img?.longitude));
+              const hasCoords =
+                (Number.isFinite(Number(img?.subjectLatitude)) && Number.isFinite(Number(img?.subjectLongitude))) ||
+                (Number.isFinite(Number(img?.latitude)) && Number.isFinite(Number(img?.longitude)));
               if (annId && plates.length > 0 && hasCoords) {
                 approvals.push({ assetId: id, annotationId: annId, plates });
               }
