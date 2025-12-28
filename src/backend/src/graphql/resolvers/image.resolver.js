@@ -2,6 +2,7 @@ import { AssetsService } from '../../services/assets.js';
 import { GraphQLUpload } from 'graphql-upload-minimal';
 import { requireAuth, requirePermission } from '../../utils/auth.js';
 import { ImageAnalysisService } from '../../services/image-analysis.js';
+import { ProjectSettingsService } from '../../services/project-settings.js';
 
 const imageResolvers = {
   Upload: GraphQLUpload,
@@ -87,6 +88,20 @@ const imageResolvers = {
         limit: args.limit,
         offset: args.offset,
       });
+    },
+
+    suggestImageLocationInterpolations: async (parent, args, context) => {
+      requirePermission(context.user, 'write');
+
+      let maxMinutes = args?.maxMinutes;
+      if (maxMinutes === null || maxMinutes === undefined) {
+        const settingsSvc = new ProjectSettingsService(context.dbPool);
+        const settings = await settingsSvc.getProjectSettings({ recomputeIfAutoUpdate: false });
+        maxMinutes = settings?.locationInterpolationMaxMinutes ?? 30;
+      }
+
+      const assetsService = new AssetsService(context.dbPool);
+      return await assetsService.suggestInterpolatedAssetLocations({ maxMinutes });
     },
   },
 

@@ -30,6 +30,8 @@ const Settings = () => {
   const [homeLng, setHomeLng] = useState('');
   const [isHomePickerOpen, setIsHomePickerOpen] = useState(false);
 
+  const [locationInterpolationMaxMinutes, setLocationInterpolationMaxMinutes] = useState('30');
+
   const [aiEnabled, setAiEnabled] = useState(true);
   const [aiSendExif, setAiSendExif] = useState(false);
   const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState('');
@@ -64,11 +66,38 @@ const Settings = () => {
     setHomeLat(s.homeLat == null ? '' : String(s.homeLat));
     setHomeLng(s.homeLng == null ? '' : String(s.homeLng));
 
+    setLocationInterpolationMaxMinutes(
+      s.locationInterpolationMaxMinutes == null ? '30' : String(s.locationInterpolationMaxMinutes)
+    );
+
      setAiEnabled(s.aiEnabled !== false);
       setAiSendExif(!!s.aiSendExif);
      setLmStudioBaseUrl(String(s.lmStudioBaseUrl || ''));
      setLmStudioModel(String(s.lmStudioModel || ''));
   }, [data?.projectSettings]);
+
+  const handleSaveInterpolation = async () => {
+    const n = Number.parseInt(String(locationInterpolationMaxMinutes || '').trim(), 10);
+    if (!Number.isFinite(n) || n < 1) {
+      showNotification('Interpolation window must be a positive integer (minutes)', 'error');
+      return;
+    }
+
+    try {
+      await updateProjectSettings({
+        variables: {
+          input: {
+            locationInterpolationMaxMinutes: n,
+          },
+        },
+      });
+      await refetch();
+      showNotification('Saved', 'success');
+    } catch (e) {
+      console.error(e);
+      showNotification(e?.message || 'Failed to save interpolation settings', 'error');
+    }
+  };
 
   const mgrs = useMemo(() => {
     const lat = homeLat === '' ? null : Number(homeLat);
@@ -446,6 +475,33 @@ const Settings = () => {
 
           <div style={{ marginTop: 10, color: '#888', fontSize: 12 }}>
             When disabled, AI buttons, history, and AI-derived helpers are hidden.
+          </div>
+        </div>
+
+        <div style={{ background: '#1a1a1a', border: '1px solid #3a3a3a', borderRadius: 8, padding: 16 }}>
+          <h3 style={{ margin: '0 0 10px 0' }}>Location interpolation</h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 10, alignItems: 'center' }}>
+            <label>Max bracket span (minutes)</label>
+            <input
+              value={locationInterpolationMaxMinutes}
+              onChange={(e) => setLocationInterpolationMaxMinutes(e.target.value)}
+              placeholder="30"
+              style={{ padding: 8, borderRadius: 6, border: '1px solid #444', background: '#111', color: '#eee' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            <button
+              onClick={handleSaveInterpolation}
+              style={{ padding: '8px 12px', borderRadius: 6, border: 'none', background: 'rgba(40, 167, 69, 0.9)', color: 'white', cursor: 'pointer' }}
+            >
+              Save interpolation settings
+            </button>
+          </div>
+
+          <div style={{ marginTop: 10, color: '#888', fontSize: 12 }}>
+            Only images from the same camera make+model are used. Coordinates are filled by straight time interpolation between the nearest earlier+later geotagged images within this span.
           </div>
         </div>
 

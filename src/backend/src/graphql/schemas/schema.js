@@ -10,6 +10,8 @@ export const typeDefs = `#graphql
     image(id: ID!): Image
     imagesInArea(bounds: BoundsInput!): [Image!]!
     imagesByEntity(entityId: ID!, limit: Int, offset: Int): [Image!]!
+
+    suggestImageLocationInterpolations(maxMinutes: Int): [ImageLocationInterpolationSuggestion!]!
     annotations(assetId: ID!): [Annotation!]!
     annotation(id: ID!): Annotation
 
@@ -116,6 +118,7 @@ export const typeDefs = `#graphql
       aiSendExif: Boolean!
       lmStudioBaseUrl: String!
       lmStudioModel: String
+      locationInterpolationMaxMinutes: Int!
   }
 
   input UpdateProjectSettingsInput {
@@ -126,6 +129,25 @@ export const typeDefs = `#graphql
       aiSendExif: Boolean
       lmStudioBaseUrl: String
       lmStudioModel: String
+      locationInterpolationMaxMinutes: Int
+  }
+
+  type ImageLocationInterpolationSuggestion {
+    imageId: ID!
+    captureTimestamp: String!
+    cameraMake: String
+    cameraModel: String
+    proposedLatitude: Float!
+    proposedLongitude: Float!
+    prevImageId: ID!
+    prevCaptureTimestamp: String!
+    prevLatitude: Float!
+    prevLongitude: Float!
+    nextImageId: ID!
+    nextCaptureTimestamp: String!
+    nextLatitude: Float!
+    nextLongitude: Float!
+    spanMinutes: Float!
   }
 
   type LmStudioModel {

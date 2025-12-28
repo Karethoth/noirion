@@ -809,4 +809,145 @@ export class AssetsService {
       aiAnalysis: metadata.aiAnalysis || null
     };
   }
+
+  async suggestInterpolatedAssetLocations({ maxMinutes = 30 } = {}) {
+    const windowMs = Math.max(1, Number(maxMinutes || 30)) * 60 * 1000;
+
+    const client = await this.dbPool.connect();
+    try {
+      const { rows } = await client.query(
+        `
+          SELECT
+            a.id,
+            COALESCE(m.capture_timestamp, e.capture_timestamp) AS capture_ts,
+            ST_Y(COALESCE(m.gps, e.gps)) AS latitude,
+            ST_X(COALESCE(m.gps, e.gps)) AS longitude,
+            e.camera_make AS camera_make,
+            e.camera_model AS camera_model
+          FROM assets a
+          LEFT JOIN asset_metadata_manual m ON m.asset_id = a.id
+          LEFT JOIN asset_metadata_exif e ON e.asset_id = a.id
+          WHERE a.deleted_at IS NULL
+            AND a.content_type LIKE 'image/%'
+            AND COALESCE(m.capture_timestamp, e.capture_timestamp) IS NOT NULL
+        `
+      );
+
+      const norm = (v) => String(v || '').trim().toLowerCase();
+      const cameraKey = (make, model) => {
+        const mk = norm(make);
+        const md = norm(model);
+        if (!mk || !md) return null;
+        return `${mk}|${md}`;
+      };
+
+      const items = (rows || [])
+        .map((r) => {
+          const ts = r.capture_ts ? new Date(r.capture_ts) : null;
+          const t = ts && !Number.isNaN(ts.getTime()) ? ts : null;
+          if (!t) return null;
+          const lat = r.latitude !== null && r.latitude !== undefined ? Number(r.latitude) : null;
+          const lng = r.longitude !== null && r.longitude !== undefined ? Number(r.longitude) : null;
+          return {
+            id: String(r.id),
+            t,
+            lat: Number.isFinite(lat) ? lat : null,
+            lng: Number.isFinite(lng) ? lng : null,
+            make: r.camera_make ?? null,
+            model: r.camera_model ?? null,
+            key: cameraKey(r.camera_make, r.camera_model),
+          };
+        })
+        .filter(Boolean);
+
+      const byCamera = new Map();
+      for (const it of items) {
+        if (!it.key) continue; // enforce same camera model constraint
+        if (!byCamera.has(it.key)) byCamera.set(it.key, []);
+        byCamera.get(it.key).push(it);
+      }
+
+      const out = [];
+
+      for (const group of byCamera.values()) {
+        group.sort((a, b) => a.t.getTime() - b.t.getTime() || a.id.localeCompare(b.id));
+
+        // Precompute indices of known-geo points for efficient nearest search.
+        const knownIdx = [];
+        for (let i = 0; i < group.length; i += 1) {
+          if (Number.isFinite(group[i].lat) && Number.isFinite(group[i].lng)) knownIdx.push(i);
+        }
+        if (knownIdx.length < 2) continue;
+
+        for (let i = 0; i < group.length; i += 1) {
+          const cur = group[i];
+          if (Number.isFinite(cur.lat) && Number.isFinite(cur.lng)) continue; // already has coords
+
+          // Find nearest known before and after.
+          let prev = null;
+          let next = null;
+
+          for (let k = knownIdx.length - 1; k >= 0; k -= 1) {
+            const idx = knownIdx[k];
+            if (idx < i) {
+              prev = group[idx];
+              break;
+            }
+          }
+          for (let k = 0; k < knownIdx.length; k += 1) {
+            const idx = knownIdx[k];
+            if (idx > i) {
+              next = group[idx];
+              break;
+            }
+          }
+
+          if (!prev || !next) continue;
+          if (!Number.isFinite(prev.lat) || !Number.isFinite(prev.lng)) continue;
+          if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) continue;
+
+          const t0 = prev.t.getTime();
+          const t1 = next.t.getTime();
+          const t = cur.t.getTime();
+          if (!(t0 < t && t < t1)) continue;
+
+          const span = t1 - t0;
+          if (span <= 0 || span > windowMs) continue; // enforce max span between bracket points
+
+          const w = (t - t0) / span;
+          const proposedLat = prev.lat + w * (next.lat - prev.lat);
+          const proposedLng = prev.lng + w * (next.lng - prev.lng);
+          if (!Number.isFinite(proposedLat) || !Number.isFinite(proposedLng)) continue;
+
+          out.push({
+            imageId: cur.id,
+            captureTimestamp: cur.t.toISOString(),
+            cameraMake: cur.make,
+            cameraModel: cur.model,
+            proposedLatitude: proposedLat,
+            proposedLongitude: proposedLng,
+            prevImageId: prev.id,
+            prevCaptureTimestamp: prev.t.toISOString(),
+            prevLatitude: prev.lat,
+            prevLongitude: prev.lng,
+            nextImageId: next.id,
+            nextCaptureTimestamp: next.t.toISOString(),
+            nextLatitude: next.lat,
+            nextLongitude: next.lng,
+            spanMinutes: span / 60000,
+          });
+        }
+      }
+
+      // Sort suggestions by time, then id for determinism.
+      out.sort((a, b) =>
+        String(a.captureTimestamp).localeCompare(String(b.captureTimestamp)) ||
+        String(a.imageId).localeCompare(String(b.imageId))
+      );
+
+      return out;
+    } finally {
+      client.release();
+    }
+  }
 }

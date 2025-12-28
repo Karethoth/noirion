@@ -8,6 +8,7 @@ const KEYS = {
   aiSendExif: 'ai.sendExif',
   lmStudioBaseUrl: 'ai.lmStudio.baseUrl',
   lmStudioModel: 'ai.lmStudio.model',
+  locationInterpolationMaxMinutes: 'assets.locationInterpolation.maxMinutes',
 };
 
 function normalizeBoolean(v, defaultValue = true) {
@@ -33,6 +34,13 @@ function normalizeBaseUrl(v) {
     throw new Error('lmStudioBaseUrl must start with http:// or https://');
   }
   return s.replace(/\/$/, '');
+}
+
+function normalizeInt(v, { defaultValue, min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (v === null || v === undefined || v === '') return defaultValue;
+  const n = typeof v === 'number' ? v : Number.parseInt(String(v), 10);
+  if (!Number.isFinite(n)) return defaultValue;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
 export class ProjectSettingsService {
@@ -166,6 +174,13 @@ export class ProjectSettingsService {
     const lmStudioModelRaw = await this.#getValue(KEYS.lmStudioModel);
     const lmStudioModel = (typeof lmStudioModelRaw === 'string' ? lmStudioModelRaw : lmStudioModelRaw?.id || lmStudioModelRaw?.model || null);
 
+    const locationInterpolationMaxMinutesRaw = await this.#getValue(KEYS.locationInterpolationMaxMinutes);
+    const locationInterpolationMaxMinutes = normalizeInt(locationInterpolationMaxMinutesRaw, {
+      defaultValue: 30,
+      min: 1,
+      max: 24 * 60,
+    });
+
     return {
       homeLat,
       homeLng,
@@ -174,11 +189,12 @@ export class ProjectSettingsService {
       aiSendExif: !!aiSendExif,
       lmStudioBaseUrl: String(lmStudioBaseUrl || '').replace(/\/$/, ''),
       lmStudioModel: lmStudioModel ? String(lmStudioModel) : null,
+      locationInterpolationMaxMinutes,
     };
   }
 
   async updateProjectSettings(
-    { homeLat, homeLng, homeAutoUpdate, aiEnabled, aiSendExif, lmStudioBaseUrl, lmStudioModel } = {},
+    { homeLat, homeLng, homeAutoUpdate, aiEnabled, aiSendExif, lmStudioBaseUrl, lmStudioModel, locationInterpolationMaxMinutes } = {},
     updatedBy
   ) {
     if (homeAutoUpdate !== undefined) {
@@ -201,6 +217,11 @@ export class ProjectSettingsService {
     if (lmStudioModel !== undefined) {
       const next = lmStudioModel == null ? null : String(lmStudioModel).trim();
       await this.#setValue(KEYS.lmStudioModel, next || null, updatedBy);
+    }
+
+    if (locationInterpolationMaxMinutes !== undefined) {
+      const next = normalizeInt(locationInterpolationMaxMinutes, { defaultValue: 30, min: 1, max: 24 * 60 });
+      await this.#setValue(KEYS.locationInterpolationMaxMinutes, next, updatedBy);
     }
 
     const hasLat = homeLat !== undefined && homeLat !== null;

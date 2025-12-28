@@ -10,6 +10,7 @@ export const GET_PROJECT_SETTINGS = gql`
       aiSendExif
       lmStudioBaseUrl
       lmStudioModel
+      locationInterpolationMaxMinutes
     }
   }
 `;
@@ -24,6 +25,7 @@ export const UPDATE_PROJECT_SETTINGS = gql`
       aiSendExif
       lmStudioBaseUrl
       lmStudioModel
+      locationInterpolationMaxMinutes
     }
   }
 `;
@@ -38,6 +40,7 @@ export const RECALCULATE_PROJECT_HOME_LOCATION = gql`
       aiSendExif
       lmStudioBaseUrl
       lmStudioModel
+      locationInterpolationMaxMinutes
     }
   }
 `;

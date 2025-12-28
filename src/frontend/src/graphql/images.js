@@ -68,6 +68,28 @@ export const GET_IMAGE = gql`
   }
 `;
 
+export const SUGGEST_IMAGE_LOCATION_INTERPOLATIONS = gql`
+  query SuggestImageLocationInterpolations($maxMinutes: Int) {
+    suggestImageLocationInterpolations(maxMinutes: $maxMinutes) {
+      imageId
+      captureTimestamp
+      cameraMake
+      cameraModel
+      proposedLatitude
+      proposedLongitude
+      prevImageId
+      prevCaptureTimestamp
+      prevLatitude
+      prevLongitude
+      nextImageId
+      nextCaptureTimestamp
+      nextLatitude
+      nextLongitude
+      spanMinutes
+    }
+  }
+`;
+
 export const SET_IMAGE_AUTO_PRESENCE_IGNORES = gql`
   mutation SetImageAutoPresenceIgnoredEntities($imageId: ID!, $ignoredEntityIds: [ID!]!) {
     setImageAutoPresenceIgnoredEntities(imageId: $imageId, ignoredEntityIds: $ignoredEntityIds) {
